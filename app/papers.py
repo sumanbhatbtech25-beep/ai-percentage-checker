@@ -188,7 +188,10 @@ def _norm_title(t: str) -> str:
 # --------------------------------------------------------------------------- main
 def find_similar(text: str, top: int = 5, query: str | None = None) -> dict:
     text = text.strip()
-    kws = keywords(text)
+    from .compare import _sentences  # lazy: compare imports this module
+
+    prose = " ".join(_sentences(text, limit=400))  # no cover page, headings, references or declarations
+    kws = keywords(prose if len(prose.split()) >= 40 else text)
     queries = [query.strip()] if query and query.strip() else build_queries(text, kws)
     if not queries:
         return {"keywords": kws, "queries": [], "papers": [], "errors": ["Not enough text to search."]}
@@ -222,6 +225,7 @@ def find_similar(text: str, top: int = 5, query: str | None = None) -> dict:
         p["similarity"] = round(s, 4)
         blob = (p["title"] + " " + p["abstract"]).lower()
         p["shared_terms"] = [k for k in kw_low if k in blob][:6]
+        p["abstract_full"] = p["abstract"]  # kept whole for the comparison step
         if len(p["abstract"]) > 900:
             p["abstract"] = p["abstract"][:900].rsplit(" ", 1)[0] + "…"
     cands.sort(key=lambda p: p["similarity"], reverse=True)

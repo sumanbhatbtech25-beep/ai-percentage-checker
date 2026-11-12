@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI Checker · Report Program</title>
-  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/style.css?v=13">
   <script>document.documentElement.dataset.page = location.pathname.startsWith("/editor") ? "editor" : "checker";</script>
 </head>
 <body>
@@ -83,6 +83,7 @@
             <button id="toEditor" class="primary checker-only">Fix it in the Editor →</button>
             <button id="fixAll" class="fix-all editor-only" title="Swap every highlighted word for its top suggestion">Fix all</button>
             <button id="editToggle" class="editor-only">Edit text</button>
+            <span class="save-wrap"><button id="saveReport" class="save-btn">Save report</button><span id="saveStatus" class="muted tiny"></span></span>
             <button id="newDoc">New document</button>
             <a class="btn-link" href="/papers">Find similar papers →</a>
           </div>
@@ -132,6 +133,6 @@
 
 <script src="/static/nav.js?v=1"></script>
 <script src="/static/confetti.js?v=1"></script>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Report Program</title>
   <meta name="description" content="Check your report for AI writing, edit it in your own words, and find similar research papers.">
-  <link rel="stylesheet" href="/static/style.css?v=12">
-  <link rel="stylesheet" href="/static/home.css?v=1">
+  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/home.css?v=2">
 </head>
 <body>
 <header class="topbar">
@@ -20,6 +20,14 @@
     <p class="eyebrow">Your report, checked and polished</p>
     <h1>Welcome to <span>REPORT PROGRAM</span></h1>
     <p class="lead">Three tools for getting a report ready to hand in. Choose the one you need. They share your text, so you can move from one to the next without uploading again.</p>
+  </section>
+
+  <section id="saved" class="saved" hidden aria-labelledby="savedTitle">
+    <div class="saved-head">
+      <h2 id="savedTitle">Your saved reports</h2>
+      <span class="muted tiny">Stored on this computer until you delete them</span>
+    </div>
+    <ul id="savedList" class="saved-list"></ul>
   </section>
 
   <section class="tools-grid">
@@ -82,6 +90,7 @@
 </main>
 
 <script src="/static/nav.js?v=1"></script>
+<script src="/static/home.js?v=1"></script>
 <script>
   (async function poll() {
     try {

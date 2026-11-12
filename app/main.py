@@ -7,10 +7,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config
+from . import config, reports
 from .detector import analyze
 from .extract import extract_text, text_to_docx
 from .models import DEVICE, get_models
+from .compare import compare
 from .papers import find_similar
 from .rewrite import rewrite_paragraph
 
@@ -81,6 +82,64 @@ def papers_ep(body: PapersIn):
     if len(body.text.split()) < 5 and not body.query.strip():
         raise HTTPException(400, "Paste your project text or type a topic to search.")
     return find_similar(body.text[: config.MAX_CHARS] or body.query, query=body.query or None)
+
+
+class CompareIn(BaseModel):
+    text: str
+    papers: list[dict]
+
+
+@app.post("/api/papers/compare")
+def compare_ep(body: CompareIn):
+    if not body.papers:
+        raise HTTPException(400, "No papers to compare")
+    papers = [
+        {"title": str(p.get("title", ""))[:400], "year": p.get("year"),
+         "abstract_full": str(p.get("abstract_full") or p.get("abstract") or "")[:4000]}
+        for p in body.papers[:5]
+    ]
+    return {"comparisons": compare(body.text[: config.MAX_CHARS], papers)}
+
+
+# ----------------------------------------------------------------------------- saved reports
+class ReportIn(BaseModel):
+    text: str
+    mode: str = "standard"
+    id: str | None = None
+    title: str | None = None
+    ai_percent: int | None = None
+
+
+@app.get("/api/reports")
+def reports_list():
+    return {"reports": reports.list_reports()}
+
+
+@app.get("/api/reports/{report_id}")
+def reports_get(report_id: str):
+    try:
+        return reports.get_report(report_id)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "Report not found")
+
+
+@app.post("/api/reports")
+def reports_save(body: ReportIn):
+    if not body.text.strip():
+        raise HTTPException(400, "Nothing to save")
+    try:
+        return reports.save_report(body.text, body.mode, body.id, body.title, body.ai_percent)
+    except ValueError:
+        raise HTTPException(400, "Invalid report id")
+
+
+@app.delete("/api/reports/{report_id}")
+def reports_delete(report_id: str):
+    try:
+        reports.delete_report(report_id)
+    except ValueError:
+        raise HTTPException(404, "Report not found")
+    return {"deleted": report_id}
 
 
 @app.get("/papers")

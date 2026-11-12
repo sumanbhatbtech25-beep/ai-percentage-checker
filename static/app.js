@@ -6,19 +6,24 @@ if (EDITOR) document.title = "Editor · Report Program";
 
 // "Fix it in the Editor" hands the current text over to /editor, which re-runs it there
 function openInEditor() {
-  try { sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value })); } catch {}
-  location.href = "/editor";
+  try {
+    sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value, reportId: state.reportId, title: state.title }));
+  } catch {}
+  state.leaving = true; // a saved report carries over, so no "unsaved changes" warning
+  location.href = state.reportId ? `/editor?report=${state.reportId}` : "/editor";
 }
 ["toEditor", "toEditor2"].forEach((id) => $(id)?.addEventListener("click", openInEditor));
 function takeHandoff() {
-  if (!EDITOR) return;
+  if (!EDITOR) return false;
   let h = null;
   try { h = JSON.parse(sessionStorage.getItem("aic_handoff") || "null"); sessionStorage.removeItem("aic_handoff"); } catch {}
-  if (!h || !h.text) return;
+  if (!h || !h.text) return false;
   $("input").value = h.text;
   if (h.mode) $("mode").value = h.mode;
+  if (h.reportId) { state.reportId = h.reportId; state.title = h.title || ""; state.savedText = h.text; }
   updateCheckBtn();
   runAnalysis(h.text);
+  return true;
 }
 
 // ------------------------------------------------------------------ model status
@@ -29,7 +34,7 @@ async function pollHealth() {
       $("status").textContent = `Models ready (${r.device.toUpperCase()})`;
       $("status").className = "status ready";
       updateCheckBtn();
-      takeHandoff();
+      if (!takeHandoff()) loadSavedFromUrl();
       return;
     }
   } catch {}
@@ -55,6 +60,7 @@ async function loadFile(file) {
   if (!r.ok) { $("filename").textContent = j.detail || "Could not read file"; return; }
   $("input").value = j.text;
   $("filename").textContent = file.name;
+  state.title = file.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim();
   updateCheckBtn();
 }
 $("file").addEventListener("change", (e) => e.target.files[0] && loadFile(e.target.files[0]));
@@ -84,6 +90,7 @@ async function runAnalysis(text) {
     $("submit").hidden = true;
     $("report").hidden = false;
     renderAll();
+    if (state.reportId && j.ai_percent !== state.savedScore) saveReport(); // keep the saved score current
     // party crackers when the text reads as human
     if (j.ai_percent < 5 && j.word_count > 0 && window.partyCrackers) setTimeout(window.partyCrackers, 350);
     window.scrollTo({ top: 0 });
@@ -321,8 +328,86 @@ function renderSuggList() {
     : "<li class='muted'>No suggestions — nothing stood out.</li>";
 }
 
+// ------------------------------------------------------------------ saved reports
+// Reports are stored by the local server in data/reports/ until the user deletes them.
+// After the first save, every change is saved automatically.
+let saveTimer = null;
+
+function hasUnsaved() {
+  if (!state.result) return false;
+  return state.reportId ? state.text !== state.savedText : state.edits > 0;
+}
+
+function renderSaveStatus(msg) {
+  const btn = $("saveReport"), st = $("saveStatus");
+  if (!btn) return;
+  if (msg) { st.textContent = msg; return; }
+  if (!state.reportId) { btn.textContent = "Save report"; btn.classList.remove("saved"); st.textContent = ""; return; }
+  const clean = state.text === state.savedText;
+  btn.textContent = clean ? "Saved ✓" : "Save now";
+  btn.classList.toggle("saved", clean);
+  st.textContent = clean ? "Find it on the home page" : "Saving…";
+}
+
+async function saveReport() {
+  if (!state.text.trim()) return;
+  clearTimeout(saveTimer);
+  const textAtSave = state.text;
+  try {
+    const r = await fetch("/api/reports", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: state.reportId, text: textAtSave, mode: $("mode").value, title: state.title || null, ai_percent: state.result?.ai_percent ?? null }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "Couldn't save");
+    state.reportId = j.id;
+    state.title = j.title;
+    state.savedText = textAtSave;
+    state.savedScore = j.ai_percent;
+    const url = new URL(location.href);
+    url.searchParams.set("report", j.id);
+    history.replaceState(null, "", url);
+    renderSaveStatus();
+  } catch (e) {
+    renderSaveStatus(`Not saved: ${e.message}`);
+  }
+}
+
+function autoSave() {
+  if (!state.reportId || state.text === state.savedText) return renderSaveStatus();
+  renderSaveStatus();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveReport, 800);
+}
+
+async function loadSavedFromUrl() {
+  const id = new URLSearchParams(location.search).get("report");
+  if (!id) return;
+  try {
+    const r = await fetch(`/api/reports/${encodeURIComponent(id)}`);
+    if (!r.ok) throw new Error("This saved report no longer exists.");
+    const d = await r.json();
+    state.reportId = d.id;
+    state.title = d.title;
+    state.savedText = d.text;
+    state.savedScore = d.ai_percent;
+    $("input").value = d.text;
+    if (d.mode) $("mode").value = d.mode;
+    updateCheckBtn();
+    runAnalysis(d.text);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+$("saveReport")?.addEventListener("click", saveReport);
+window.addEventListener("beforeunload", (e) => {
+  if (!state.leaving && hasUnsaved()) { e.preventDefault(); e.returnValue = ""; }
+});
+
 function renderStale() {
   try { sessionStorage.setItem("aic_text", state.text); } catch {}
+  autoSave();
   const n = state.edits;
   $("stale").hidden = n === 0;
   $("staleMsg").textContent = state.undo
@@ -520,8 +605,13 @@ function finishEditing() {
   renderDoc(); renderSuggList(); renderStale();
 }
 $("newDoc").addEventListener("click", () => {
+  if (hasUnsaved() && !confirm("You have unsaved changes. Start a new document anyway?")) return;
   $("report").hidden = true; $("submit").hidden = false;
-  $("input").value = state.text; updateCheckBtn();
+  $("input").value = ""; $("filename").textContent = "";
+  Object.assign(state, { reportId: null, title: "", savedText: "", result: null, edits: 0, undo: null });
+  const url = new URL(location.href); url.searchParams.delete("report"); history.replaceState(null, "", url);
+  renderSaveStatus();
+  updateCheckBtn();
 });
 
 // ------------------------------------------------------------------ export

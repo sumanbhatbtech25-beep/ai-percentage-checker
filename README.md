@@ -11,6 +11,10 @@ Three tools for getting a report ready to hand in, all running locally on your G
 
 "Fix it in the Editor →" on the checker carries your text straight into the editor, and the papers page picks up your last text automatically.
 
+**Saved reports:** "Save report" on the checker or editor stores the report on this computer in `data/reports/`, which is git-ignored and never uploaded. After the first save, every change is saved automatically. The home page lists saved reports with **Continue this report** and **Delete**, and each one stays until you delete it.
+
+**Research Papers:** each of the top 5 papers has two buttons, **How your project differs** and **What you can improve**. Each comparison is grounded in the parts of the paper's abstract your report doesn't cover, then summarised by the local Qwen model. Only abstracts are used.
+
 Together the tools:
 
 * takes **.docx / .pdf / .txt** uploads or pasted text

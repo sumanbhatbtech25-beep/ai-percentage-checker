@@ -102,6 +102,9 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .fix-all:disabled { background: var(--applied); border-color: var(--applied); color: var(--ok); cursor: default; filter: none; }
 .fix-n { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 99px; background: rgba(255,255,255,.28); font-size: 12px; line-height: 18px; }
 @media (prefers-color-scheme: dark) { .fix-all:not(:disabled) { color: #1a1206; } .fix-n { background: rgba(0,0,0,.18); } }
+.save-wrap { display: inline-flex; align-items: center; gap: 8px; }
+.save-btn { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.save-btn.saved { border-color: var(--ok); color: var(--ok); background: var(--applied); }
 .stale-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn-link { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 14px; color: var(--accent); text-decoration: none; font-size: 15px; }
 .btn-link:hover { border-color: var(--accent); }

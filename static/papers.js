@@ -38,11 +38,56 @@ async function search() {
     const j = await r.json();
     if (!r.ok) throw new Error(j.detail || "Search failed");
     render(j);
+    $("busy").hidden = true;
+    if (j.papers.length) compareWithProject(text, j.papers);
   } catch (e) {
     alert(e.message);
   } finally {
     $("busy").hidden = true;
   }
+}
+
+// ---------------------------------------------------------------- project vs paper
+const words = (t) => (t.match(/[A-Za-z][A-Za-z'\-]*/g) || []).length;
+
+// The comparisons are fetched once in the background right after the results
+// appear; the two buttons on each card just reveal them.
+let comparisons = null; // Promise<array>
+
+function compareWithProject(text, papers) {
+  if (words(text) < 60) {
+    comparisons = Promise.resolve(papers.map(() => ({ error: "Paste or upload your project above to see how it compares with this paper." })));
+    return;
+  }
+  comparisons = fetch("/api/papers/compare", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, papers: papers.map((p) => ({ title: p.title, year: p.year, abstract_full: p.abstract_full || p.abstract })) }),
+  })
+    .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.detail || "Comparison failed"); return j.comparisons; })
+    .catch((e) => papers.map(() => ({ error: `Couldn't compare: ${e.message}` })));
+}
+
+const PANEL_TITLE = { diff: "How your project differs", imp: "What you can improve using this paper" };
+
+async function togglePanel(btn) {
+  const card = btn.closest(".paper");
+  const i = +btn.dataset.i, kind = btn.dataset.k;
+  const panel = card.querySelector(".cmp-panel");
+  const wasOpen = btn.classList.contains("on");
+  card.querySelectorAll(".cmp-btn").forEach((b) => { b.classList.remove("on"); b.setAttribute("aria-expanded", "false"); });
+  if (wasOpen) { panel.hidden = true; return; }
+  btn.classList.add("on");
+  btn.setAttribute("aria-expanded", "true");
+  panel.hidden = false;
+  panel.className = `cmp-panel ${kind}`;
+  if (!comparisons) { panel.innerHTML = `<p class="muted tiny">Run a search first.</p>`; return; }
+  panel.innerHTML = `<div class="cmp-loading"><span class="dot"></span>Comparing with your project… (a few seconds)</div>`;
+  const c = (await comparisons)[i];
+  if (!btn.classList.contains("on")) return; // closed or switched while waiting
+  if (c.error) { panel.innerHTML = `<p class="muted tiny">${esc(c.error)}</p>`; return; }
+  const items = kind === "diff" ? c.differences : c.improvements;
+  panel.innerHTML = `<h4>${PANEL_TITLE[kind]}</h4><ul>${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` +
+    `<p class="cmp-note">Based on the paper's abstract${c.source === "ai" ? ", summarised by the local AI model" : ""}. Check the full paper before relying on it.</p>`;
 }
 
 function render(j) {
@@ -74,10 +119,17 @@ function card(p, i) {
         ${p.pdf ? `<a href="${esc(p.pdf)}" target="_blank" rel="noopener">Free PDF ↗</a>` : ""}
         <span class="muted">via ${esc(p.source)}</span>
       </div>
+      <div class="cmp-actions">
+        <button class="cmp-btn" data-k="diff" data-i="${i}" aria-expanded="false">How your project differs</button>
+        <button class="cmp-btn" data-k="imp" data-i="${i}" aria-expanded="false">What you can improve</button>
+      </div>
+      <div class="cmp-panel" hidden></div>
     </div>
   </li>`;
 }
 $("results").addEventListener("click", (e) => {
+  const cb = e.target.closest(".cmp-btn");
+  if (cb) return togglePanel(cb);
   const b = e.target.closest(".more");
   if (!b) return;
   const abs = b.closest(".paper").querySelector(".abs");
