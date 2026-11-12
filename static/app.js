@@ -1,5 +1,25 @@
 const $ = (id) => document.getElementById(id);
-const state = { text: "", result: null, edits: 0, editing: false, popFor: -1, panels: {} };
+const state = { text: "", result: null, edits: 0, editing: false, popFor: -1, panels: {}, view: "flagged" };
+// Same page serves /checker (score report) and /editor (tap-to-change words, rewrites, export)
+const EDITOR = document.documentElement.dataset.page === "editor";
+if (EDITOR) document.title = "Editor · Report Program";
+
+// "Fix it in the Editor" hands the current text over to /editor, which re-runs it there
+function openInEditor() {
+  try { sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value })); } catch {}
+  location.href = "/editor";
+}
+["toEditor", "toEditor2"].forEach((id) => $(id)?.addEventListener("click", openInEditor));
+function takeHandoff() {
+  if (!EDITOR) return;
+  let h = null;
+  try { h = JSON.parse(sessionStorage.getItem("aic_handoff") || "null"); sessionStorage.removeItem("aic_handoff"); } catch {}
+  if (!h || !h.text) return;
+  $("input").value = h.text;
+  if (h.mode) $("mode").value = h.mode;
+  updateCheckBtn();
+  runAnalysis(h.text);
+}
 
 // ------------------------------------------------------------------ model status
 async function pollHealth() {
@@ -9,6 +29,7 @@ async function pollHealth() {
       $("status").textContent = `Models ready (${r.device.toUpperCase()})`;
       $("status").className = "status ready";
       updateCheckBtn();
+      takeHandoff();
       return;
     }
   } catch {}
@@ -58,6 +79,8 @@ async function runAnalysis(text) {
     state.result = j;
     state.edits = 0;
     state.panels = {};
+    state.undo = null;
+    state.fixedCount = 0;
     $("submit").hidden = true;
     $("report").hidden = false;
     renderAll();
@@ -90,12 +113,25 @@ function renderScore() {
   const arc = $("arc");
   arc.style.strokeDashoffset = 326.7 * (1 - pct / 100);
   arc.style.stroke = pct >= 50 ? "var(--ai-strong)" : pct >= 20 ? "var(--mid-strong)" : "var(--ok)";
-  const modeName = { very_hard: "Very hard", strict: "Strict", standard: "Standard" }[r.mode];
-  $("scoreMeta").textContent = `${r.word_count} words · ${modeName} mode`;
-  $("scoreText").textContent = pct < 5 ? "Reads as human-written. Nice work!" : "of text likely AI-generated";
+  const modeName = { very_hard: "Very hard", strict: "Strict", standard: "Balanced" }[r.mode];
+  $("pct").textContent = r.low_confidence ? `${pct}*` : pct;
+  $("scoreMeta").textContent = `${r.word_count} words scored · ${modeName} mode` +
+    (r.excluded_words ? ` · ${r.excluded_words} words not counted (headings, lists, quotes, references)` : "");
+  $("scoreText").textContent = pct < 5
+    ? "Reads as human-written. Nice work!"
+    : r.low_confidence
+      ? "Low confidence: under 20%, false positives are common (Turnitin shows this range as *%)"
+      : "of text likely AI-generated";
   $("warnings").innerHTML = (r.warnings || []).map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("");
   const s = r.signals || {};
   setSig("Cls", s.classifier); setSig("Bino", s.binoculars); setSig("Style", s.style);
+  const paras = r.paragraphs || [];
+  const count = (lv) => paras.filter((p) => p.ai_percent !== null && level(p.ai_percent) === lv).length;
+  $("paraCounts").innerHTML = paras.length
+    ? [["high", "likely AI"], ["mid", "borderline"], ["low", "look fine"]]
+        .filter(([lv]) => count(lv))
+        .map(([lv, label]) => `<span class="badge ${lv}">${count(lv)} paragraph${count(lv) === 1 ? "" : "s"} ${label}</span>`).join("")
+    : "";
 }
 function setSig(k, v) {
   v = v ?? 0;
@@ -103,20 +139,21 @@ function setSig(k, v) {
   $("bar" + k).style.width = v * 100 + "%";
 }
 
+const EXCLUDED = { heading: "heading or title", list: "list item", caption: "caption", reference: "reference list", code: "code", table: "table row", quote: "direct quotation", short: "too short to judge" };
 const level = (pct) => (pct >= 50 ? "high" : pct >= 20 ? "mid" : "low");
 const pctOf = (v) => Math.round((v ?? 0) * 100) + "%";
 
 function renderRange(a, b) {
   const { text } = state;
   const r = state.result;
-  const thr = r.threshold;
   let html = "", pos = a;
   for (const s of r.sentences) {
     if (s.start < a || s.end > b) continue;
     html += esc(text.slice(pos, s.start));
-    const cls = s.score >= thr ? "s-high" : s.score >= thr * 0.75 ? "s-mid" : "";
+    // colour is applied per paragraph (see .para.lvl-*), not per sentence
+    const cls = "";
     let inner = "", p = s.start;
-    r.suggestions.forEach((g, i) => {
+    if (EDITOR) r.suggestions.forEach((g, i) => {
       if (g.start < s.start || g.end > s.end) return;
       inner += esc(text.slice(p, g.start));
       const c = `w sev-${g.severity}${g.applied ? " applied" : ""}`;
@@ -125,7 +162,9 @@ function renderRange(a, b) {
       p = g.end;
     });
     inner += esc(text.slice(p, s.end));
-    html += `<span class="${cls}" title="AI likelihood ${Math.round(s.score * 100)}%">${inner}</span>`;
+    html += s.score === null
+      ? `<span class="excl" title="Not counted: ${esc(EXCLUDED[s.kind] || "not prose")}">${inner}</span>`
+      : `<span class="${cls}" title="AI likelihood ${Math.round(s.score * 100)}%">${inner}</span>`;
     pos = s.end;
   }
   return html + esc(text.slice(pos, b));
@@ -137,17 +176,73 @@ function renderDoc() {
     $("doc").innerHTML = `<div class="pbody">${esc(state.text)}</div>`;
     return;
   }
-  $("doc").innerHTML = paras.map((p, i) => {
+  const meta = paraMeta();
+  const flaggedOnly = state.view !== "all";
+  const flagged = paras.map((p, i) => isFlagged(p, i));
+  const nFlagged = flagged.filter(Boolean).length;
+  $("flagCount").textContent = nFlagged;
+
+  const one = (p, i) => {
+    if (p.ai_percent === null) {
+      return `<section class="para excluded" id="para-${i}">` +
+        `<div class="para-head"><span class="badge none">Not counted · ${esc(p.excluded || "not prose")}</span></div>` +
+        `<div class="pbody">${renderRange(p.start, p.end)}</div></section>`;
+    }
     const lv = level(p.ai_percent);
     const open = !!state.panels[i];
+    const where = meta[i].heading ? `<span class="where">in ${esc(meta[i].heading)}</span>` : "";
     return `<section class="para lvl-${lv}" id="para-${i}">` +
-      `<div class="para-head"><span class="badge ${lv}">¶${i + 1} · ${p.rewritten ? "rewritten · " : ""}${p.ai_percent}% AI</span>` +
-      `<button class="small rw-btn" data-p="${i}">${open ? "Hide" : "Why AI? · Suggest better paragraph"}</button></div>` +
+      `<div class="para-head"><span class="badge ${lv}">¶${meta[i].n} · ${p.rewritten ? "rewritten · " : ""}${p.ai_percent}% AI</span>${where}` +
+      `<button class="small rw-btn" data-p="${i}">${open ? "Hide" : EDITOR ? "Why AI? · Suggest better paragraph" : "Why AI?"}</button></div>` +
       `<div class="pbody">${renderRange(p.start, p.end)}</div>` +
       (open ? renderPanel(i) : "") +
       `</section>`;
-  }).join("");
+  };
+
+  if (!flaggedOnly) {
+    $("doc").innerHTML = paras.map(one).join("");
+    return;
+  }
+  if (!nFlagged) {
+    $("doc").innerHTML = `<div class="all-clear"><b>No paragraphs flagged.</b> Every paragraph reads as human-written in this mode.` +
+      `<button class="small show-all">Show full document</button></div>`;
+    return;
+  }
+  // flagged paragraphs only, with a one-line marker for each run of hidden ones
+  let html = "", hidden = 0;
+  paras.forEach((p, i) => {
+    if (flagged[i]) {
+      if (hidden) html += `<button class="gap show-all">${hidden} ${hidden === 1 ? "paragraph looks" : "paragraphs look"} fine · show</button>`;
+      hidden = 0;
+      html += one(p, i);
+    } else if (p.ai_percent !== null) hidden++;
+  });
+  if (hidden) html += `<button class="gap show-all">${hidden} ${hidden === 1 ? "paragraph looks" : "paragraphs look"} fine · show</button>`;
+  $("doc").innerHTML = html;
 }
+
+// A paragraph is shown in "Flagged only" view when it scores 20%+ (Turnitin's
+// reporting floor), was rewritten, or has its help panel open.
+function isFlagged(p, i) {
+  return (p.ai_percent !== null && (p.ai_percent >= 20 || p.rewritten)) || !!state.panels[i];
+}
+
+// Paragraph numbers counting only real (scored) paragraphs, plus the nearest heading above.
+function paraMeta() {
+  let n = 0, heading = "";
+  return (state.result.paragraphs || []).map((p) => {
+    if (p.ai_percent !== null) n++;
+    else if (p.excluded === "Heading or title") heading = state.text.slice(p.start, p.end).trim().slice(0, 60);
+    return { n, heading };
+  });
+}
+
+function setView(v) {
+  state.view = v;
+  document.querySelectorAll(".view-toggle button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  renderDoc();
+}
+document.querySelectorAll(".view-toggle button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 
 function renderPanel(i) {
   const p = state.result.paragraphs[i];
@@ -174,10 +269,11 @@ function renderPanel(i) {
 }
 
 function renderParaList() {
-  const paras = (state.result.paragraphs || []).map((p, i) => ({ p, i }));
+  const meta = paraMeta();
+  const paras = (state.result.paragraphs || []).map((p, i) => ({ p, i })).filter(({ p }) => p.ai_percent !== null);
   paras.sort((x, y) => y.p.ai_percent - x.p.ai_percent || y.p.score - x.p.score);
   $("paraList").innerHTML = paras.length
-    ? paras.map(({ p, i }) => `<li data-p="${i}"><span class="badge ${level(p.ai_percent)}">${p.ai_percent}%</span> ¶${i + 1} ${esc(state.text.slice(p.start, p.start + 55))}…</li>`).join("")
+    ? paras.map(({ p, i }) => `<li data-p="${i}"><span class="badge ${level(p.ai_percent)}">${p.ai_percent}%</span> ¶${meta[i].n} ${esc(state.text.slice(p.start, p.start + 55))}…</li>`).join("")
     : "<li class='muted'>Re-check to see paragraph scores.</li>";
 }
 
@@ -229,7 +325,10 @@ function renderStale() {
   try { sessionStorage.setItem("aic_text", state.text); } catch {}
   const n = state.edits;
   $("stale").hidden = n === 0;
-  $("staleMsg").textContent = `${n} change${n === 1 ? "" : "s"} made. The score above is from before your edits.`;
+  $("staleMsg").textContent = state.undo
+    ? `Fix all changed ${state.fixedCount} word${state.fixedCount === 1 ? "" : "s"} (shown in green). Re-check to see your new score.`
+    : `${n} change${n === 1 ? "" : "s"} made. The score above is from before your edits.`;
+  renderFixAll();
 }
 
 // ------------------------------------------------------------------ dropdown
@@ -241,6 +340,7 @@ $("doc").addEventListener("click", (e) => {
     renderDoc();
     return;
   }
+  if (e.target.closest(".show-all")) return setView("all");
   const gen = e.target.closest(".gen-btn");
   if (gen) return generateRewrites(+gen.dataset.p);
   const use = e.target.closest(".use-btn");
@@ -260,7 +360,8 @@ $("suggList").addEventListener("click", (e) => {
   const li = e.target.closest("li[data-i]");
   if (!li) return;
   const i = +li.dataset.i;
-  const span = document.querySelector(`.w[data-i="${i}"]`);
+  let span = document.querySelector(`.w[data-i="${i}"]`);
+  if (!span && state.view !== "all") { setView("all"); span = document.querySelector(`.w[data-i="${i}"]`); }  // word sits in a hidden paragraph
   if (span) { span.scrollIntoView({ block: "center", behavior: "smooth" }); setTimeout(() => openPop(i, span), 300); }
 });
 
@@ -317,7 +418,7 @@ document.addEventListener("mousedown", (e) => {
   if (!$("pop").hidden && !e.target.closest("#pop") && !e.target.closest(".w") && !e.target.closest("#suggList")) closePop();
 });
 
-function applyReplacement(i, value) {
+function applyReplacement(i, value, silent = false) {
   const r = state.result;
   const g = r.suggestions[i];
   let { start, end } = g;
@@ -341,10 +442,53 @@ function applyReplacement(i, value) {
     });
   }
   state.edits++;
+  if (silent) return;
   renderDoc();
   renderSuggList();
   renderStale();
 }
+
+// ------------------------------------------------------------------ fix all
+// Swap every highlighted word/phrase for its top suggestion in one go (undoable).
+function pendingFixes() {
+  if (!state.result) return [];
+  return state.result.suggestions
+    .map((g, i) => ({ g, i }))
+    .filter(({ g }) => !g.applied && g.alternatives.some((a) => a && a !== "(remove)"));
+}
+
+function fixAll() {
+  if (state.editing) finishEditing();
+  const todo = pendingFixes();
+  if (!todo.length) return;
+  state.undo = { text: state.text, result: structuredClone(state.result), edits: state.edits };
+  // apply from the end of the text backwards so earlier offsets stay valid
+  for (const { g, i } of todo.slice().reverse()) {
+    const current = state.text.slice(g.start, g.end);
+    const alt = g.alternatives.find((a) => a && a !== "(remove)" && a !== current);
+    if (alt) applyReplacement(i, alt, true);
+  }
+  state.fixedCount = todo.length;
+  renderDoc(); renderSuggList(); renderParaList(); renderStale();
+}
+
+function undoFixAll() {
+  if (!state.undo) return;
+  Object.assign(state, { text: state.undo.text, result: state.undo.result, edits: state.undo.edits, undo: null, fixedCount: 0 });
+  closePop();
+  renderAll();
+}
+
+function renderFixAll() {
+  const btn = $("fixAll");
+  if (!btn) return;
+  const n = pendingFixes().length;
+  btn.disabled = n === 0;
+  btn.innerHTML = n ? `Fix all <span class="fix-n">${n}</span>` : "All fixed ✓";
+  $("undoFix").hidden = !state.undo;
+}
+$("fixAll")?.addEventListener("click", fixAll);
+$("undoFix")?.addEventListener("click", undoFixAll);
 
 // ------------------------------------------------------------------ free editing
 $("editToggle").addEventListener("click", () => {

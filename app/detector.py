@@ -33,11 +33,17 @@ WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*[A-Za-z]|[A-Za-z]")
 ABBREV = {"e.g", "i.e", "etc", "mr", "mrs", "ms", "dr", "prof", "vs", "fig", "al", "no", "st", "jr", "sr", "inc", "ltd", "co"}
 
 MODES = {
-    # name: (weights, flag threshold)
-    "standard": {"threshold": 0.55},
-    "strict": {"threshold": 0.45},
-    "very_hard": {"threshold": 0.38},
+    # Tuned with app/tune.py on pre-ChatGPT human writing (student essays, academic
+    # essays, arXiv abstracts) vs AI essays / ChatGPT answers.
+    #   cls_center: the DeBERTa classifier only counts as "AI" once it's more confident
+    #               than this. Raw 0.5 flagged ~48% of real student-essay sections.
+    #   w_cls / w_style: weights in the fused score (Binoculars gets the remainder).
+    #   threshold: a sentence is flagged when its fused score reaches this.
+    "standard": {"cls_center": 0.99, "w_cls": 0.80, "w_style": 0.05, "threshold": 0.54},
+    "strict": {"cls_center": 0.95, "w_cls": 0.60, "w_style": 0.05, "threshold": 0.48},
+    "very_hard": {"cls_center": 0.95, "w_cls": 0.50, "w_style": 0.05, "threshold": 0.36},
 }
+DEFAULT_MODE = "standard"
 
 
 def sigmoid(x: float) -> float:
@@ -51,13 +57,16 @@ class Sentence:
     end: int
     text: str
     words: int
+    para: int = 0  # index of the paragraph (line) the sentence belongs to
+    kind: str = "prose"  # "prose" counts toward the AI %; anything else is excluded (see classify_qualifying)
 
 
 def split_sentences(text: str) -> list[Sentence]:
     sents: list[Sentence] = []
     # paragraphs first, then sentence boundaries inside each paragraph
-    for para in re.finditer(r"[^\n]+", text):
+    for pi, para in enumerate(re.finditer(r"[^\n]+", text)):
         p_start, chunk = para.start(), para.group(0)
+        first = len(sents)
         last = 0
         for m in re.finditer(r"[.!?]+[\"')\]]*(?=\s+|$)", chunk):
             before = chunk[last : m.start()].split()
@@ -68,6 +77,8 @@ def split_sentences(text: str) -> list[Sentence]:
             last = m.end()
         if last < len(chunk):
             _add(sents, text, p_start + last, p_start + len(chunk))
+        for s in sents[first:]:
+            s.para = pi
     return sents
 
 
@@ -81,6 +92,33 @@ def _add(sents: list[Sentence], text: str, a: int, b: int) -> None:
         n = len(WORD_RE.findall(s))
         if n:
             sents.append(Sentence(a, b, s, n))
+
+
+MIN_GROUP_WORDS = 25  # headings / one-liners get scored together with the paragraph after them
+
+
+def build_paragraph_windows(sents: list[Sentence]) -> list[tuple[int, int]]:
+    """Windows that never cross a paragraph boundary, so one paragraph's score
+    can't bleed into its neighbours. Very short paragraphs (headings, captions)
+    are joined to the following paragraph so they still get a usable window."""
+    groups: list[list[int]] = []
+    pending: list[int] = []
+    for pi in dict.fromkeys(s.para for s in sents):
+        idx = [i for i, s in enumerate(sents) if s.para == pi]
+        pending += idx
+        if sum(sents[i].words for i in pending) >= MIN_GROUP_WORDS:
+            groups.append(pending)
+            pending = []
+    if pending:
+        if groups:
+            groups[-1] += pending
+        else:
+            groups.append(pending)
+    windows = []
+    for g in groups:
+        base = g[0]
+        windows += [(base + a, base + b) for a, b in build_windows(sents[g[0] : g[-1] + 1])]
+    return windows
 
 
 def build_windows(sents: list[Sentence]) -> list[tuple[int, int]]:
@@ -123,98 +161,206 @@ def style_score(sents: list[Sentence]) -> float:
 
 
 # --------------------------------------------------------------------------- fusion
+def _logit(p: float) -> float:
+    p = min(max(p, 1e-6), 1 - 1e-6)
+    return math.log(p / (1 - p))
+
+
+def calibrated_cls(pc: float, mode: str) -> float:
+    """Shift the classifier so that its own `cls_center` confidence maps to 0.5."""
+    return sigmoid(_logit(pc) - _logit(MODES[mode]["cls_center"]))
+
+
 def fuse(pc: float, pb: float, ps: float, mode: str) -> float:
-    if mode == "standard":
-        return 0.5 * pc + 0.4 * pb + 0.1 * ps
-    hi, lo = max(pc, pb), min(pc, pb)
-    if mode == "strict":
-        return 0.55 * hi + 0.35 * lo + 0.10 * ps
-    # very_hard: whichever detector is most suspicious dominates
-    return 0.70 * hi + 0.18 * lo + 0.12 * ps
+    m = MODES[mode]
+    return m["w_cls"] * calibrated_cls(pc, mode) + (1 - m["w_cls"] - m["w_style"]) * pb + m["w_style"] * ps
 
 
 def bino_prob(score: float) -> float:
     return sigmoid((config.BINO_THRESHOLD - score) / config.BINO_SCALE)
 
 
+# --------------------------------------------------------------------------- qualifying text
+# Turnitin only scores "qualifying text": prose sentences in long-form writing.
+# Lists, tables, code, headings etc. are left out, and so are text you quote or
+# cite (quoting and referencing sources is allowed; it isn't your AI writing).
+_LIST_RE = re.compile(r"^\s*(?:[-*•·▪◦●○‣⁃]|\(?\d{1,3}[.)]|\(?[a-zA-Z][.)]|[ivxIVX]{1,4}[.)])\s+")
+_CAPTION_RE = re.compile(r"^\s*(?:fig(?:ure)?\.?|table|chart|graph|source|note|equation)\s*[\dIVX]*\s*[:.\-–]", re.I)
+_REF_HEAD_RE = re.compile(r"^\s*(?:\d+[.)]?\s*)?(?:references?|bibliography|works cited|reference list|sources|citations|literature cited)\s*:?\s*$", re.I)
+_BACK_HEAD_RE = re.compile(r"^\s*(?:\d+[.)]?\s*)?(?:appendix|appendices|acknowledg(?:e)?ments?)\b", re.I)
+_REF_ENTRY_RE = re.compile(r"(\(\d{4}[a-z]?\)|\b(19|20)\d{2}[a-z]?\.)|doi\.org|https?://|\bvol\.|\bpp\.|^\s*\[\d+\]", re.I)
+_CODE_RE = re.compile(r"[{};=<>]|^\s*(def|class|import|for|while|if|return|public|private|#include)\b")
+_QUOTE_RE = re.compile(r"[\"“]([^\"”]{12,})[\"”]")
+
+EXCLUDED_LABELS = {
+    "heading": "Heading or title",
+    "list": "List item",
+    "caption": "Figure or table caption",
+    "reference": "Reference list",
+    "code": "Code",
+    "table": "Table row",
+    "quote": "Direct quotation (cited source)",
+    "short": "Too short to judge",
+}
+
+
+def classify_qualifying(text: str, sents: list[Sentence]) -> None:
+    """Set Sentence.kind: 'prose' (scored) or the reason it's excluded."""
+    lines = list(re.finditer(r"[^\n]+", text))
+    line_kind: dict[int, str] = {}
+    in_refs = False
+    for pi, m in enumerate(lines):
+        line = m.group(0).strip()
+        words = len(WORD_RE.findall(line))
+        if _REF_HEAD_RE.match(line):
+            in_refs, kind = True, "heading"
+        elif in_refs and _BACK_HEAD_RE.match(line):
+            in_refs, kind = False, "heading"
+        elif in_refs:
+            kind = "reference"
+        elif _CAPTION_RE.match(line):
+            kind = "caption"
+        elif (line.count("\t") >= 2 or line.count("|") >= 2) and words / (max(line.count("\t"), line.count("|")) + 1) < 8:
+            kind = "table"  # several short tab/pipe-separated cells; long prose with stray tabs still counts
+        elif _LIST_RE.match(line) and words < 60:
+            kind = "list"
+        elif words <= 12 and not re.search(r"[.!?]\s*[\"')\]]*$", line):
+            kind = "heading"  # short line with no full stop: a title or heading
+        elif _CODE_RE.search(line) and words < 25 and len(re.findall(r"[{};=()<>]", line)) >= 3:
+            kind = "code"
+        elif _REF_ENTRY_RE.search(line) and words < 60 and line.count(",") >= 2 and re.match(r"^\s*([A-Z][A-Za-z'\-]+,\s*[A-Z]\.|\[\d+\])", line):
+            kind = "reference"  # a lone reference entry outside a References section
+        else:
+            kind = "prose"
+        line_kind[pi] = kind
+
+    for s in sents:
+        kind = line_kind.get(s.para, "prose")
+        if kind == "prose":
+            quoted = sum(len(WORD_RE.findall(q)) for q in _QUOTE_RE.findall(s.text))
+            if quoted and quoted >= 0.6 * s.words:
+                kind = "quote"
+            elif s.words < 4:
+                kind = "short"
+        s.kind = kind
+
+
 # --------------------------------------------------------------------------- main entry
-def analyze(text: str, mode: str = "very_hard", with_suggestions: bool = True) -> dict:
-    if mode not in MODES:
-        mode = "very_hard"
-    text = text.replace("\r\n", "\n")[: config.MAX_CHARS]
+@dataclass
+class Raw:
+    """Everything the models produce for one text; scoring rules run on top of this."""
+    text: str
+    sents: list
+    q: list            # indices (into sents) of qualifying sentences
+    windows: list      # (a, b) index ranges into q
+    pcs: list          # classifier prob per window
+    bino: list         # raw Binoculars score per window
+    styles: list       # style score per window
+    sent_pc: dict      # sents index -> sentence-level classifier prob
+    token_probs: dict  # char offset -> list of token probabilities
+
+
+def collect_raw(text: str) -> Raw:
     sents = split_sentences(text)
-    total_words = sum(s.words for s in sents)
-    warnings = []
-    if total_words < config.MIN_RELIABLE_WORDS:
-        warnings.append(
-            f"Only {total_words} words. Detectors (including Turnitin, which needs 300+) are unreliable on short text."
-        )
-    if not sents:
-        return {"ai_percent": 0, "mode": mode, "word_count": 0, "sentences": [], "paragraphs": [], "suggestions": [], "warnings": warnings, "signals": {}, "threshold": MODES[mode]["threshold"]}
+    classify_qualifying(text, sents)
+    q = [i for i, s in enumerate(sents) if s.kind == "prose"]
+    qs = [sents[i] for i in q]
+    windows = build_paragraph_windows(qs) if qs else []
+    if not windows:
+        return Raw(text, sents, q, [], [], [], [], {}, {})
+    def window_text(a: int, b: int) -> tuple[str, bool]:
+        """Contiguous slice of the document when nothing excluded sits in between
+        (so token offsets map back), otherwise the prose sentences joined."""
+        gap_has_text = any(text[qs[k].end:qs[k + 1].start].strip() for k in range(a, b - 1))
+        if gap_has_text:
+            return " ".join(s.text for s in qs[a:b]), False
+        return text[qs[a].start:qs[b - 1].end], True
 
+    built = [window_text(a, b) for a, b in windows]
+    win_texts = [t for t, _ in built]
     m = get_models()
-    windows = build_windows(sents)
-    win_texts = [text[sents[a].start : sents[b - 1].end] for a, b in windows]
-    win_offsets = [sents[a].start for a, _ in windows]
-
     with m.lock:
         pcs = m.classifier_probs(win_texts)
         bino = m.binoculars(win_texts)
-        long_idx = [i for i, s in enumerate(sents) if s.words >= 12]
+        long_idx = [i for i in q if sents[i].words >= 12]
         sent_pc = dict(zip(long_idx, m.classifier_probs([sents[i].text for i in long_idx])))
-
-    win_scores, win_detail = [], []
-    token_probs: dict[int, list[float]] = {}  # word char start -> probs
+    token_probs: dict[int, list[float]] = {}
     for wi, (a, b) in enumerate(windows):
-        pc = pcs[wi]
-        bscore, toks = bino[wi]
-        pb = bino_prob(bscore)
-        ps = style_score(sents[a:b])
-        win_scores.append(fuse(pc, pb, ps, mode))
-        win_detail.append({"classifier": pc, "binoculars_score": bscore, "binoculars": pb, "style": ps})
-        base = win_offsets[wi]
-        for s, e, p in toks:
+        if not built[wi][1]:
+            continue  # offsets only map back for contiguous windows
+        base = qs[a].start
+        for s, e, p in bino[wi][1]:
             token_probs.setdefault(base + s, []).append(p)
+    return Raw(text, sents, q, windows, pcs, [b[0] for b in bino],
+               [style_score(qs[a:b]) for a, b in windows], sent_pc, token_probs)
 
-    # sentence pooling
-    thr = MODES[mode]["threshold"]
-    sent_scores = []
-    for i, s in enumerate(sents):
-        covering = [win_scores[w] for w, (a, b) in enumerate(windows) if a <= i < b]
+
+def score_raw(raw: Raw, mode: str) -> tuple[list, list]:
+    """Return (sentence scores aligned with raw.sents, None for excluded), window scores."""
+    win_scores = [fuse(pc, bino_prob(bs), ps, mode) for pc, bs, ps in zip(raw.pcs, raw.bino, raw.styles)]
+    scores: list = [None] * len(raw.sents)
+    for qi, si in enumerate(raw.q):
+        covering = [win_scores[w] for w, (a, b) in enumerate(raw.windows) if a <= qi < b]
+        if not covering:
+            continue
         pooled = sum(covering) / len(covering)
-        if i in sent_pc:
-            local = sent_pc[i]
-            pooled = 0.75 * pooled + 0.25 * (max(local, pooled) if mode == "very_hard" else local)
-        sent_scores.append(pooled)
+        if si in raw.sent_pc:
+            pooled = 0.75 * pooled + 0.25 * calibrated_cls(raw.sent_pc[si], mode)
+        scores[si] = pooled
+    return scores, win_scores
 
-    flagged_words = sum(s.words for s, sc in zip(sents, sent_scores) if sc >= thr)
-    ai_percent = round(100 * flagged_words / total_words) if total_words else 0
 
-    def avg(key):
-        return sum(d[key] for d in win_detail) / len(win_detail)
+def analyze(text: str, mode: str = DEFAULT_MODE, with_suggestions: bool = True) -> dict:
+    if mode not in MODES:
+        mode = DEFAULT_MODE
+    text = text.replace("\r\n", "\n")[: config.MAX_CHARS]
+    raw = collect_raw(text)
+    sents = raw.sents
+    thr = MODES[mode]["threshold"]
+    q_words = sum(sents[i].words for i in raw.q)
+    excluded_words = sum(s.words for s in sents) - q_words
+    warnings = []
+    if q_words < config.MIN_RELIABLE_WORDS:
+        warnings.append(
+            f"Only {q_words} words of prose to score. Turnitin won't give an AI score below 300 words, so treat this result as a rough guide."
+        )
+    if not raw.windows:
+        return {"ai_percent": 0, "mode": mode, "word_count": 0, "excluded_words": excluded_words,
+                "sentences": [], "paragraphs": [], "suggestions": [], "warnings": warnings,
+                "signals": {}, "threshold": thr, "low_confidence": False}
 
+    sent_scores, win_scores = score_raw(raw, mode)
+    flagged_words = sum(s.words for s, sc in zip(sents, sent_scores) if sc is not None and sc >= thr)
+    ai_percent = round(100 * flagged_words / q_words) if q_words else 0
+
+    n = len(raw.windows)
     result = {
         "ai_percent": ai_percent,
+        # Turnitin shows 1-19% as "*%" because false positives are more likely in that range
+        "low_confidence": 0 < ai_percent < 20,
         "mode": mode,
         "threshold": thr,
-        "word_count": total_words,
+        "word_count": q_words,
+        "excluded_words": excluded_words,
         "warnings": warnings,
         "signals": {
-            "classifier": round(avg("classifier"), 3),
-            "binoculars": round(avg("binoculars"), 3),
-            "binoculars_raw": round(avg("binoculars_score"), 4),
-            "style": round(avg("style"), 3),
-            "document_score": round(sum(win_scores) / len(win_scores), 3),
+            "classifier": round(sum(raw.pcs) / n, 3),
+            "binoculars": round(sum(bino_prob(b) for b in raw.bino) / n, 3),
+            "binoculars_raw": round(sum(raw.bino) / n, 4),
+            "style": round(sum(raw.styles) / n, 3),
+            "document_score": round(sum(win_scores) / n, 3),
         },
         "sentences": [
-            {"start": s.start, "end": s.end, "score": round(sc, 3), "flagged": sc >= thr}
+            {"start": s.start, "end": s.end, "kind": s.kind,
+             "score": None if sc is None else round(sc, 3),
+             "flagged": sc is not None and sc >= thr}
             for s, sc in zip(sents, sent_scores)
         ],
         "paragraphs": paragraph_scores(text, sents, sent_scores, thr),
         "suggestions": [],
     }
     if with_suggestions:
-        result["suggestions"] = build_suggestions(text, sents, sent_scores, thr, token_probs)
+        result["suggestions"] = build_suggestions(text, sents, sent_scores, thr, raw.token_probs)
     return result
 
 
@@ -224,17 +370,24 @@ def paragraph_scores(text, sents, sent_scores, thr):
     paras = []
     for pm in re.finditer(r"[^\n]+", text):
         a, b = pm.start(), pm.end()
-        inside = [(s, sc) for s, sc in zip(sents, sent_scores) if s.start >= a and s.end <= b]
-        words = sum(s.words for s, _ in inside)
-        if not words:
+        inside_all = [(s, sc) for s, sc in zip(sents, sent_scores) if s.start >= a and s.end <= b]
+        if not inside_all:
             continue
-        flagged = sum(s.words for s, sc in inside if sc >= thr)
-        mean = sum(s.words * sc for s, sc in inside) / words
         # trim surrounding whitespace so offsets match sentence spans
         while a < b and text[a].isspace():
             a += 1
         while b > a and text[b - 1].isspace():
             b -= 1
+        inside = [(s, sc) for s, sc in inside_all if sc is not None]
+        words = sum(s.words for s, _ in inside)
+        if not words:
+            # nothing scoreable here: a heading, list item, reference, quote...
+            kind = max((s.kind for s, _ in inside_all), key=[s.kind for s, _ in inside_all].count)
+            paras.append({"start": a, "end": b, "words": 0, "ai_percent": None, "score": None,
+                          "excluded": EXCLUDED_LABELS.get(kind, "Not counted"), "reasons": []})
+            continue
+        flagged = sum(s.words for s, sc in inside if sc >= thr)
+        mean = sum(s.words * sc for s, sc in inside) / words
         paras.append({
             "start": a, "end": b, "words": words,
             "ai_percent": round(100 * flagged / words), "score": round(mean, 3),
@@ -304,6 +457,8 @@ def build_suggestions(text, sents, sent_scores, thr, token_probs, max_predictabl
 
     # 1. curated AI-phrase lexicon (whole document; higher priority in flagged sentences)
     for s, sc in zip(sents, sent_scores):
+        if sc is None:
+            continue  # headings, references, quotes etc. are not suggested
         for a, b, phrase in find_lexicon_hits(s.text):
             alts = [_match_case(phrase, x) for x in alternatives_for(phrase)]
             alts = [x if x else "(remove)" for x in alts]
@@ -319,7 +474,7 @@ def build_suggestions(text, sents, sent_scores, thr, token_probs, max_predictabl
     # 2. highly predictable content words in flagged / borderline sentences
     targets = []
     for s, sc in zip(sents, sent_scores):
-        if sc < thr * 0.8:
+        if sc is None or sc < thr * 0.8:
             continue
         cands = []
         for wm in WORD_RE.finditer(s.text):

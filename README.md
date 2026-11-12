@@ -1,6 +1,17 @@
-# AI Percentage Checker
+# REPORT PROGRAM
 
-A Turnitin-style AI-writing checker that runs locally on your GPU. It:
+Three tools for getting a report ready to hand in, all running locally on your GPU:
+
+| Page | URL | What it does |
+|---|---|---|
+| **Home** | `/` | Welcome page explaining each tool, with a button to open it |
+| **AI Checker** | `/checker` | AI % score, highlighted sentences, per-paragraph scores and "Why AI?" reasons |
+| **Editor** | `/editor` | Everything in the checker, plus tap-to-change words, paragraph rewrites, re-check, confetti under 5%, and .docx/.txt export |
+| **Research Papers** | `/papers` | Top 5 research papers most similar to your report |
+
+"Fix it in the Editor →" on the checker carries your text straight into the editor, and the papers page picks up your last text automatically.
+
+Together the tools:
 
 * takes **.docx / .pdf / .txt** uploads or pasted text
 * shows an **AI %** using Turnitin's unit: the share of text in sentences flagged as AI

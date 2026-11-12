@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Report Program</title>
+  <meta name="description" content="Check your report for AI writing, edit it in your own words, and find similar research papers.">
+  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/home.css?v=1">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="logo">◎</span> REPORT PROGRAM</a>
+  <nav class="nav"><a href="/">Home</a><a href="/checker">AI Checker</a><a href="/editor">Editor</a><a href="/papers">Research Papers</a></nav>
+  <div id="status" class="status loading">Starting up…</div>
+</header>
+
+<main class="home">
+  <section class="hero">
+    <p class="eyebrow">Your report, checked and polished</p>
+    <h1>Welcome to <span>REPORT PROGRAM</span></h1>
+    <p class="lead">Three tools for getting a report ready to hand in. Choose the one you need. They share your text, so you can move from one to the next without uploading again.</p>
+  </section>
+
+  <section class="tools-grid">
+    <article class="tool t-check">
+      <div class="tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/><path d="M8 11.5l2 2 4-4"/></svg>
+      </div>
+      <h2>AI Checker</h2>
+      <p class="tag">See how AI-like your report looks</p>
+      <ul>
+        <li>One AI % score, measured the way Turnitin reports it: the share of sentences flagged</li>
+        <li>Three detectors combined: a deep classifier, Binoculars and writing style</li>
+        <li>Every paragraph scored, with a plain explanation of why it's flagged</li>
+        <li>Standard, Strict and Very hard modes</li>
+      </ul>
+      <a class="open" href="/checker">Open AI Checker <span aria-hidden="true">→</span></a>
+    </article>
+
+    <article class="tool t-edit">
+      <div class="tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>
+      </div>
+      <h2>Editor</h2>
+      <p class="tag">Fix what gets flagged, in your own words</p>
+      <ul>
+        <li>Flagged words are highlighted. Tap one to choose a replacement</li>
+        <li>"Why AI?" tips for each paragraph, plus rewrites to use as a starting point</li>
+        <li>Re-check as you go. Get under 5% and the confetti comes out</li>
+        <li>Download the revised report as .docx or .txt</li>
+      </ul>
+      <a class="open" href="/editor">Open Editor <span aria-hidden="true">→</span></a>
+    </article>
+
+    <article class="tool t-papers">
+      <div class="tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 016.5 3H20v15H6.5A2.5 2.5 0 004 20.5v-15z"/><path d="M4 20.5A2.5 2.5 0 016.5 18H20v3H6.5"/><path d="M9 8h7M9 11h5"/></svg>
+      </div>
+      <h2>Research Papers</h2>
+      <p class="tag">Find the 5 papers closest to your work</p>
+      <ul>
+        <li>Upload your report or type a topic</li>
+        <li>Searches OpenAlex and Semantic Scholar, which cover 250M+ works</li>
+        <li>Results ranked on this computer by how close their meaning is to your report</li>
+        <li>Shows authors, year, citations, the abstract and free PDFs when available</li>
+      </ul>
+      <a class="open" href="/papers">Open Research Papers <span aria-hidden="true">→</span></a>
+    </article>
+  </section>
+
+  <section class="flow">
+    <h3>A good order to use them in</h3>
+    <ol>
+      <li><b>Check</b><span>Get your AI % and see which paragraphs stand out.</span></li>
+      <li><b>Edit</b><span>Rewrite the flagged parts in your own voice and re-check.</span></li>
+      <li><b>Research</b><span>Find related papers to read and cite.</span></li>
+    </ol>
+  </section>
+
+  <p class="privacy muted tiny">🔒 Your report never leaves this computer. All detection and editing runs locally on your GPU. Only short keyword searches go to the paper databases.</p>
+</main>
+
+<script src="/static/nav.js?v=1"></script>
+<script>
+  (async function poll() {
+    try {
+      const r = await fetch("/api/health").then((r) => r.json());
+      const s = document.getElementById("status");
+      if (r.ready) { s.textContent = `Ready (${r.device.toUpperCase()})`; s.className = "status ready"; return; }
+      s.textContent = "Loading detection models…";
+    } catch {}
+    setTimeout(poll, 2000);
+  })();
+</script>
+</body>
+</html>

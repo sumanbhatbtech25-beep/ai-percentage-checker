@@ -3,21 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Percentage Checker</title>
-  <link rel="stylesheet" href="/static/style.css?v=5">
+  <title>AI Checker · Report Program</title>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+  <script>document.documentElement.dataset.page = location.pathname.startsWith("/editor") ? "editor" : "checker";</script>
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">◎</span> AI Percentage Checker</div>
-  <nav class="nav"><a href="/" class="on">AI Checker</a><a href="/papers">Similar Papers</a></nav>
+  <a class="brand" href="/"><span class="logo">◎</span> REPORT PROGRAM</a>
+  <nav class="nav"><a href="/">Home</a><a href="/checker">AI Checker</a><a href="/editor">Editor</a><a href="/papers">Research Papers</a></nav>
   <div id="status" class="status loading">Loading detection models…</div>
 </header>
 
 <main>
   <!-- STEP 1: submit -->
   <section id="submit" class="card">
-    <h1>Check your work for AI writing</h1>
-    <p class="muted">Upload a .docx, .pdf or .txt file, or paste your text. Analysis runs on this computer — nothing is sent anywhere else.</p>
+    <h1 class="checker-only">Check your report for AI writing</h1>
+    <h1 class="editor-only">Edit your report in your own words</h1>
+    <p class="muted checker-only">Upload a .docx, .pdf or .txt file, or paste your text, to get your AI % and see which paragraphs stand out. Analysis runs on this computer, and nothing is sent anywhere else.</p>
+    <p class="muted editor-only">Upload or paste your report. Flagged words are highlighted so you can tap one and swap it, every paragraph gets "Why AI?" tips, and you can re-check as you go. Everything runs on this computer.</p>
     <label id="drop" class="drop">
       <input id="file" type="file" accept=".docx,.pdf,.txt,.md" hidden>
       <strong>Drop a file here</strong> or click to browse
@@ -27,77 +30,95 @@
     <div class="row">
       <label class="mode">Strictness
         <select id="mode">
-          <option value="very_hard" selected>Very hard (strictest)</option>
+          <option value="standard" selected>Balanced (closest to university checkers)</option>
           <option value="strict">Strict</option>
-          <option value="standard">Standard</option>
+          <option value="very_hard">Very hard (stricter than any university checker)</option>
         </select>
       </label>
       <span id="wc" class="muted">0 words</span>
-      <button id="check" class="primary" disabled>Check for AI</button>
+      <button id="check" class="primary" disabled><span class="checker-only">Check for AI</span><span class="editor-only">Open in editor</span></button>
     </div>
   </section>
 
   <!-- STEP 2: report -->
   <section id="report" hidden>
+    <!-- score first: summary bar above the text -->
+    <div class="card summary">
+      <div class="score-card">
+        <div class="gauge" id="gauge">
+          <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle id="arc" cx="60" cy="60" r="52" class="arc"/></svg>
+          <div class="gauge-label"><span id="pct">0</span><small>%</small></div>
+        </div>
+        <div class="score-text">
+          <div class="big" id="scoreText">of text likely AI-generated</div>
+          <div class="muted" id="scoreMeta"></div>
+          <div class="para-counts" id="paraCounts"></div>
+        </div>
+      </div>
+      <div class="breakdown">
+        <h3>Detector breakdown</h3>
+        <div class="sig"><span>Deep classifier (DeBERTa)</span><b id="sigCls"></b></div>
+        <div class="bar"><i id="barCls"></i></div>
+        <div class="sig"><span>Binoculars (zero-shot LLM)</span><b id="sigBino"></b></div>
+        <div class="bar"><i id="barBino"></i></div>
+        <div class="sig"><span>Style (AI vocabulary, rhythm)</span><b id="sigStyle"></b></div>
+        <div class="bar"><i id="barStyle"></i></div>
+      </div>
+    </div>
+    <div id="warnings"></div>
+
     <div class="report-grid">
       <div class="doc-col">
+        <div class="view-toggle" role="group" aria-label="What to show">
+          <button data-view="flagged" class="on">Flagged paragraphs only <span class="pill" id="flagCount">0</span></button>
+          <button data-view="all">Full document</button>
+        </div>
         <div class="doc-toolbar">
           <div class="legend">
-            <span><i class="sw high"></i>Likely AI</span>
-            <span><i class="sw mid"></i>Borderline</span>
-            <span><i class="uline">word ▾</i>Tap a highlighted word to change it</span>
+            <span><i class="sw high"></i>Likely AI paragraph</span>
+            <span><i class="sw mid"></i>Borderline paragraph</span>
+            <span class="editor-only"><i class="uline">word ▾</i>Tap a highlighted word to change it</span>
           </div>
           <div class="tools">
-            <button id="editToggle">Edit text</button>
+            <button id="toEditor" class="primary checker-only">Fix it in the Editor →</button>
+            <button id="fixAll" class="fix-all editor-only" title="Swap every highlighted word for its top suggestion">Fix all</button>
+            <button id="editToggle" class="editor-only">Edit text</button>
             <button id="newDoc">New document</button>
             <a class="btn-link" href="/papers">Find similar papers →</a>
           </div>
         </div>
         <div id="stale" class="stale" hidden>
           <span id="staleMsg"></span>
-          <button id="recheck" class="primary small">Re-check score</button>
+          <span class="stale-actions">
+            <button id="undoFix" class="small" hidden>Undo all</button>
+            <button id="recheck" class="primary small">Re-check score</button>
+          </span>
         </div>
         <article id="doc" class="doc"></article>
         <textarea id="editor" class="doc editor" hidden></textarea>
       </div>
 
       <aside class="side">
-        <div class="card score-card">
-          <div class="gauge" id="gauge">
-            <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle id="arc" cx="60" cy="60" r="52" class="arc"/></svg>
-            <div class="gauge-label"><span id="pct">0</span><small>%</small></div>
-          </div>
-          <div class="score-text">
-            <div class="big" id="scoreText">of text likely AI-generated</div>
-            <div class="muted" id="scoreMeta"></div>
-          </div>
-        </div>
-        <div id="warnings"></div>
-
-        <div class="card">
-          <h3>Detector breakdown</h3>
-          <div class="sig"><span>Deep classifier (DeBERTa)</span><b id="sigCls"></b></div>
-          <div class="bar"><i id="barCls"></i></div>
-          <div class="sig"><span>Binoculars (zero-shot LLM)</span><b id="sigBino"></b></div>
-          <div class="bar"><i id="barBino"></i></div>
-          <div class="sig"><span>Style (AI vocabulary, rhythm)</span><b id="sigStyle"></b></div>
-          <div class="bar"><i id="barStyle"></i></div>
-          <p class="muted tiny">Each window of ~200 words is scored by all three; the strictness setting decides how they combine. Sentences inherit the score of every window that contains them.</p>
-        </div>
-
         <div class="card">
           <h3>Paragraphs by AI score</h3>
-          <p class="muted tiny">Click a paragraph to see why it's flagged and get rewritten versions.</p>
+          <p class="muted tiny checker-only">Click a paragraph to see why it's flagged.</p>
+          <p class="muted tiny editor-only">Click a paragraph to see why it's flagged and get rewritten versions.</p>
           <ol id="paraList" class="sugg-list para-list"></ol>
         </div>
 
-        <div class="card">
+        <div class="card checker-only">
+          <h3>Want to lower it?</h3>
+          <p class="muted tiny">The Editor highlights every flagged word so you can swap it with a tap, and gives tips and rewrite starting points for each paragraph.</p>
+          <button class="primary" id="toEditor2">Fix it in the Editor →</button>
+        </div>
+
+        <div class="card editor-only">
           <h3>Word suggestions <span id="suggCount" class="pill"></span></h3>
-          <p class="muted tiny">Click any underlined word in the document to pick a replacement. Then press <b>Re-check score</b>.</p>
+          <p class="muted tiny">Tap any highlighted word in the document to pick a replacement, then press <b>Re-check score</b>.</p>
           <ol id="suggList" class="sugg-list"></ol>
         </div>
 
-        <div class="card">
+        <div class="card editor-only">
           <h3>Download revised text</h3>
           <div class="row"><button id="dlDocx">.docx</button><button id="dlTxt">.txt</button><button id="copy">Copy</button></div>
         </div>
@@ -109,7 +130,8 @@
 <div id="pop" class="pop" hidden></div>
 <div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyMsg">Analyzing…</div></div>
 
+<script src="/static/nav.js?v=1"></script>
 <script src="/static/confetti.js?v=1"></script>
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -16,6 +16,10 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+/* one page, two modes (set on <html data-page>) */
+[data-page="checker"] .editor-only, [data-page="checker"] .rw-actions, [data-page="checker"] .cand-orig, [data-page="checker"] .cand { display: none !important; }
+[data-page="editor"] .checker-only { display: none !important; }
+a.brand { color: var(--ink); text-decoration: none; }
 .confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 50; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button, select, textarea, input { font: inherit; color: inherit; }
@@ -55,10 +59,25 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .editor { width: 100%; resize: vertical; white-space: pre-wrap; }
 
 /* paragraphs */
-.para { border-left: 4px solid transparent; padding: 6px 0 10px 14px; margin: 0 0 14px -18px; }
-.para.lvl-high { border-left-color: var(--ai-strong); }
-.para.lvl-mid { border-left-color: var(--mid-strong); }
+/* whole paragraphs are tinted by their AI score (no sentence-by-sentence colouring) */
+.para { border-left: 4px solid transparent; border-radius: 0 10px 10px 0; padding: 10px 16px 12px; margin: 0 0 14px; }
+.para.lvl-high { border-left-color: var(--ai-strong); background: var(--ai); }
+.para.lvl-mid { border-left-color: var(--mid-strong); background: var(--mid); }
 .para.lvl-low { border-left-color: var(--ok); }
+/* "Flagged only" view */
+.view-toggle { display: inline-flex; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; margin-bottom: 10px; }
+.view-toggle button { border: 0; background: transparent; border-radius: 7px; padding: 6px 12px; font-size: 14px; color: var(--muted); }
+.view-toggle button.on { background: var(--bg); color: var(--ink); font-weight: 600; }
+.view-toggle .pill { margin-left: 4px; }
+.where { font-size: 12.5px; color: var(--muted); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gap { display: block; width: 100%; margin: 0 0 14px; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 8px; background: transparent;
+  color: var(--muted); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; cursor: pointer; }
+.gap:hover { color: var(--ink); border-color: var(--accent); }
+.all-clear { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 18px; border-radius: 10px; background: var(--applied); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.all-clear button { margin-left: auto; }
+.para.excluded { border-left: 4px dashed var(--line); color: var(--muted); }
+.excl { color: var(--muted); text-decoration: underline dotted var(--line); text-underline-offset: 4px; }
+.badge.none { background: var(--bg); color: var(--muted); font-weight: 500; }
 .para-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 2px; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .para-head button { font-size: 12.5px; padding: 3px 10px; }
 .badge { display: inline-block; font: 600 12px/1.5 system-ui, sans-serif; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
@@ -78,6 +97,12 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .note { margin-top: 6px; font-size: 12.5px; color: var(--mid-strong); }
 .para-list li { display: flex; gap: 6px; align-items: baseline; }
 
+.fix-all { background: var(--hl-word); border-color: var(--hl-word); color: #fff; font-weight: 600; }
+.fix-all:hover { filter: brightness(1.07); border-color: var(--hl-word); }
+.fix-all:disabled { background: var(--applied); border-color: var(--applied); color: var(--ok); cursor: default; filter: none; }
+.fix-n { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 99px; background: rgba(255,255,255,.28); font-size: 12px; line-height: 18px; }
+@media (prefers-color-scheme: dark) { .fix-all:not(:disabled) { color: #1a1206; } .fix-n { background: rgba(0,0,0,.18); } }
+.stale-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn-link { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 14px; color: var(--accent); text-decoration: none; font-size: 15px; }
 .btn-link:hover { border-color: var(--accent); }
 .tools { flex-wrap: wrap; }
@@ -86,7 +111,13 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .nav { display: flex; gap: 4px; margin-right: auto; margin-left: 24px; }
 .nav a { color: var(--muted); text-decoration: none; padding: 5px 12px; border-radius: 8px; font-size: 14px; }
 .nav a.on, .nav a:hover { color: var(--ink); background: var(--bg); }
-@media (max-width: 600px) { .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 16px; } .nav { margin-left: 0; } }
+.nav a { white-space: nowrap; }
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+  .nav { order: 3; width: 100%; margin: 0; overflow-x: auto; scrollbar-width: none; }
+  .nav a { padding: 5px 10px; font-size: 13.5px; }
+  .status { margin-left: auto; }
+}
 .s-high { background: var(--ai); border-radius: 3px; }
 .s-mid { background: var(--mid); border-radius: 3px; }
 /* words with suggestions: highlighted chip + ▾ so it's obvious you can tap them */
@@ -100,6 +131,14 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .stale { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--mid); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; font-size: 14px; }
 
 .score-card { display: flex; gap: 16px; align-items: center; }
+/* summary bar at the top of the report: score first, then the text */
+.summary { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.summary .gauge { flex: none; }
+.summary .score-text .big { font-size: 18px; }
+.summary .breakdown h3 { margin-bottom: 2px; }
+.summary .gauge { width: 124px; height: 124px; }
+.para-counts { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 760px) { .summary { grid-template-columns: 1fr; gap: 16px; } }
 .gauge { position: relative; width: 112px; height: 112px; flex: none; }
 .gauge svg { transform: rotate(-90deg); width: 100%; height: 100%; }
 .gauge circle { fill: none; stroke-width: 11; }

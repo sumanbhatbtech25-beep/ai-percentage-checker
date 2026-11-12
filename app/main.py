@@ -26,7 +26,7 @@ def _warm():
 
 class AnalyzeIn(BaseModel):
     text: str
-    mode: str = "very_hard"
+    mode: str = "standard"
 
 
 class ExportIn(BaseModel):
@@ -61,7 +61,7 @@ def analyze_ep(body: AnalyzeIn):
 
 class RewriteIn(BaseModel):
     text: str
-    mode: str = "very_hard"
+    mode: str = "standard"
 
 
 @app.post("/api/rewrite")
@@ -98,7 +98,14 @@ def export_docx(body: ExportIn):
 
 
 @app.get("/")
-def index():
+def home():
+    return FileResponse(STATIC / "home.html")
+
+
+@app.get("/checker")
+@app.get("/editor")
+def checker_editor():
+    # one page, two modes: static/app.js reads the path to decide
     return FileResponse(STATIC / "index.html")
 
 

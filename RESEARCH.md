@@ -44,7 +44,43 @@ Binoculars (Qwen2.5-1.5B pair): human mean 1.018, AI mean 0.870. The threshold a
 
 **Paragraph-rewrite experiment:** for each paragraph, the Qwen2.5-1.5B-Instruct model writes 3 rewrites with different style briefs, and each is re-scored. On a ChatGPT paragraph, the rewrites cut Binoculars from 51% to 1–10% and style from 100% to about 40–50%. The classifier stayed at about 100%, because the rewrites are AI text too. The UI labels them honestly as starting points. Blocking AI-typical words during generation (`bad_words_ids`) produced broken words ("fosts"), so that was dropped.
 
-## 6. Honest limitations
+## 6. Recalibration against how the big checkers actually work (Nov 2026)
+
+### What the major checkers do
+| Checker | Key rules |
+|---|---|
+| **Turnitin** | Scores only *qualifying text*: prose sentences in long-form writing. Lists, tables, code and poetry are excluded. Needs 300+ words. Shows 1–19% as `*%` because false positives are more common there. Targets <1% false positives at document level and says the score must not be the only basis for action. Grammar tools like Grammarly aren't the target, but heavy AI paraphrasing can be flagged. |
+| **GPTZero** | Classifies sentences, then gives a whole-document class: human, mixed or AI. Its % is *confidence in that class*, not "share of text". Recommends treating uncertain results as no clear signal. |
+| **Grammarly** | Its AI Detector scores sections for AI patterns. Authorship separately records *how* text was produced (typed, pasted, AI-generated, grammar-edited) and treats grammar edits as edits, not AI writing. |
+| **Originality.ai** | Its "Lite" model explicitly allows light AI editing (spelling and grammar). |
+| **University policies** | Most allow support uses (brainstorming, grammar, spellcheck, properly cited sources). Submitting AI-generated text as your own is misconduct. Quoting and citing sources is fine; that falls under plagiarism rules, not AI rules. |
+
+### What was wrong here
+Measured on real pre-ChatGPT human writing (60 student essays, 60 academic essays, 60 arXiv abstracts) against 120 AI texts:
+
+| Mode (old) | Student essays flagged ≥20% | Academic essays | arXiv | AI caught |
+|---|---|---|---|---|
+| Standard | 47% | 28% | 5% | 100% |
+| Very hard (old default) | **83%** | 60% | 30% | 100% |
+
+The cause was the DeBERTa classifier, which rated 48% of human student-essay sections above 0.5. On AI text it is above 0.9 in 94% of cases. The style signal also fires on formal academic prose.
+
+### What changed
+1. **Qualifying-text rules** (Turnitin-style). Headings, list items, captions, table rows, code, direct quotations and the reference list are excluded and labelled "Not counted".
+2. **Classifier recalibrated.** It only counts once it is more confident than 0.99 (Balanced) or 0.95 (Strict, Very hard). Style weight is cut to 5%.
+3. **Balanced is the default**, with 1–19% shown as low-confidence `N*%`, like Turnitin.
+4. **Scoring windows stay inside paragraphs**, so one paragraph can't drag its neighbours' scores up.
+
+### Results after (all 300 texts; settings tuned on half and checked on the held-out half)
+| Mode | Student essays ≥20% | Academic | arXiv | AI essays caught | ChatGPT caught |
+|---|---|---|---|---|---|
+| **Balanced** | **3%** (avg 1.9%) | 0% | 0% | 98% (avg 81%) | 98% (avg 88%) |
+| Strict | 13% | 2% | 0% | 98% | 100% |
+| Very hard | 18% | 10% | 0% | 100% | 100% |
+
+Re-run with `python -m app.evaluate collect` then `python -m app.evaluate report`, and tune with `python -m app.tune`.
+
+## 7. Honest limitations
 
 * No detector is proof. Turnitin itself says its score shouldn't be the only basis for academic action.
 * False positives hit non-native English writers and very formulaic writing harder.

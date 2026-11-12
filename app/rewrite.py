@@ -93,7 +93,7 @@ def _generate(paragraph: str, per_style: int) -> list[str]:
     return outs
 
 
-def rewrite_paragraph(paragraph: str, mode: str = "very_hard", per_style: int = 1) -> dict:
+def rewrite_paragraph(paragraph: str, mode: str = "standard", per_style: int = 1) -> dict:
     paragraph = " ".join(paragraph.split())
     orig = analyze(paragraph, mode, with_suggestions=False)
     n_words = orig["word_count"]
