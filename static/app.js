@@ -61,6 +61,8 @@ async function runAnalysis(text) {
     $("submit").hidden = true;
     $("report").hidden = false;
     renderAll();
+    // party crackers when the text reads as human
+    if (j.ai_percent < 5 && j.word_count > 0 && window.partyCrackers) setTimeout(window.partyCrackers, 350);
     window.scrollTo({ top: 0 });
   } catch (e) {
     alert(e.message);
@@ -90,6 +92,7 @@ function renderScore() {
   arc.style.stroke = pct >= 50 ? "var(--ai-strong)" : pct >= 20 ? "var(--mid-strong)" : "var(--ok)";
   const modeName = { very_hard: "Very hard", strict: "Strict", standard: "Standard" }[r.mode];
   $("scoreMeta").textContent = `${r.word_count} words · ${modeName} mode`;
+  $("scoreText").textContent = pct < 5 ? "Reads as human-written. Nice work!" : "of text likely AI-generated";
   $("warnings").innerHTML = (r.warnings || []).map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("");
   const s = r.signals || {};
   setSig("Cls", s.classifier); setSig("Bino", s.binoculars); setSig("Style", s.style);
@@ -117,7 +120,8 @@ function renderRange(a, b) {
       if (g.start < s.start || g.end > s.end) return;
       inner += esc(text.slice(p, g.start));
       const c = `w sev-${g.severity}${g.applied ? " applied" : ""}`;
-      inner += `<span class="${c}" data-i="${i}" title="${esc(g.reason)}">${esc(text.slice(g.start, g.end)) || "&#8203;"}</span>`;
+      const tip = g.applied ? `Changed from “${g.original}”. Tap to change again or restore.` : `${g.reason}. Try: ${g.alternatives.slice(0, 3).join(", ")}`;
+      inner += `<span class="${c}" data-i="${i}" role="button" tabindex="0" title="${esc(tip)}">${esc(text.slice(g.start, g.end))}</span>`;
       p = g.end;
     });
     inner += esc(text.slice(p, s.end));
@@ -269,17 +273,28 @@ function openPop(i, anchor) {
   const opts = g.alternatives.filter((a) => a !== current);
   const pop = $("pop");
   pop.innerHTML =
+    `<div class="pop-head">Replace <b>“${esc(current || g.original)}”</b> with:</div>` +
     `<div class="why">${esc(g.reason)}</div>` +
     opts.map((a) => `<button data-v="${esc(a)}">${a === "(remove)" ? "<i>Remove it</i>" : esc(a)}</button>`).join("") +
     (g.applied ? `<button class="orig" data-v="${esc(g.original)}">↺ Restore “${esc(g.original)}”</button>` : "") +
     `<div class="custom"><input placeholder="Type your own…"><button>Use</button></div>`;
   const rect = anchor.getBoundingClientRect();
   pop.hidden = false;
-  const left = Math.min(rect.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 12);
+  const vw = document.documentElement.clientWidth;
+  const left = Math.min(rect.left + window.scrollX, window.scrollX + vw - pop.offsetWidth - 12);
   pop.style.left = Math.max(8, left) + "px";
-  pop.style.top = rect.bottom + window.scrollY + 6 + "px";
-  pop.querySelector("button")?.focus();
+  // open upward when there isn't room below the word
+  const below = window.innerHeight - rect.bottom;
+  const top = below < pop.offsetHeight + 16 && rect.top > pop.offsetHeight + 16
+    ? rect.top + window.scrollY - pop.offsetHeight - 6
+    : rect.bottom + window.scrollY + 6;
+  pop.style.top = top + "px";
+  pop.querySelector("button")?.focus({ preventScroll: true });
 }
+$("doc").addEventListener("keydown", (e) => {
+  const w = e.target.closest(".w");
+  if (w && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openPop(+w.dataset.i, w); }
+});
 function closePop() {
   $("pop").hidden = true;
   state.popFor = -1;

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI Percentage Checker</title>
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <header class="topbar">
@@ -45,7 +45,7 @@
           <div class="legend">
             <span><i class="sw high"></i>Likely AI</span>
             <span><i class="sw mid"></i>Borderline</span>
-            <span><i class="uline"></i>Click to change word</span>
+            <span><i class="uline">word ▾</i>Tap a highlighted word to change it</span>
           </div>
           <div class="tools">
             <button id="editToggle">Edit text</button>
@@ -68,7 +68,7 @@
             <div class="gauge-label"><span id="pct">0</span><small>%</small></div>
           </div>
           <div class="score-text">
-            <div class="big">of text likely AI-generated</div>
+            <div class="big" id="scoreText">of text likely AI-generated</div>
             <div class="muted" id="scoreMeta"></div>
           </div>
         </div>
@@ -109,6 +109,7 @@
 <div id="pop" class="pop" hidden></div>
 <div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyMsg">Analyzing…</div></div>
 
-<script src="/static/app.js?v=3"></script>
+<script src="/static/confetti.js?v=1"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

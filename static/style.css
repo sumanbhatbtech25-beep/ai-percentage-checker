@@ -1,18 +1,22 @@
 :root {
   --bg: #f4f6f9; --card: #fff; --ink: #1b2330; --muted: #677285; --line: #e2e6ee;
   --accent: #2563eb; --accent-ink: #fff;
-  --ai: #ffd2d2; --ai-strong: #e5484d; --mid: #fff1c2; --mid-strong: #d99a00;
-  --ok: #18a058; --hl-word: #7c3aed; --applied: #d9f7e6;
+  /* "Report style" palette: cyan = likely AI, lavender = borderline, orange = word to fix, green = changed */
+  --ai: #dff3fb; --ai-strong: #0e7490; --mid: #ece9ff; --mid-strong: #6d5bd0;
+  --ok: #16a34a; --hl-word: #f97316; --applied: #dcfce7;
+  --word-bg: #ffe0c2; --word-bg-soft: #fff0e1; --word-bg-hover: #ffd0a3; --word-ink: #7a3300;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #11151c; --card: #1a202a; --ink: #e7ebf2; --muted: #98a2b3; --line: #2a3240;
-    --ai: #4a1f24; --ai-strong: #ff6b70; --mid: #43391a; --mid-strong: #f5c044;
-    --hl-word: #b794ff; --applied: #173b2a;
+    --ai: #12343f; --ai-strong: #22d3ee; --mid: #2b2650; --mid-strong: #a99bff;
+    --ok: #22c55e; --hl-word: #fb923c; --applied: #173b2a;
+    --word-bg: #5a3214; --word-bg-soft: #43270f; --word-bg-hover: #6e3d18; --word-ink: #ffe6cf;
   }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+.confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 50; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button, select, textarea, input { font: inherit; color: inherit; }
 .muted { color: var(--muted); } .tiny { font-size: 12.5px; }
@@ -43,7 +47,7 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
 .sw { display: inline-block; width: 14px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
 .sw.high { background: var(--ai); border: 1px solid var(--ai-strong); } .sw.mid { background: var(--mid); border: 1px solid var(--mid-strong); }
-.uline { display: inline-block; width: 18px; border-bottom: 2px dotted var(--hl-word); margin-right: 5px; vertical-align: middle; }
+.uline { display: inline-block; padding: 0 4px; margin-right: 5px; border-radius: 4px; background: var(--word-bg); color: var(--word-ink); border-bottom: 2px solid var(--hl-word); font: 600 11px/1.4 system-ui, sans-serif; font-style: normal; }
 .tools { display: flex; gap: 8px; }
 .doc { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px 32px; min-height: 60vh; font: 16px/1.85 Georgia, "Times New Roman", serif; }
 @media (max-width: 600px) { .doc { padding: 16px; } }
@@ -85,10 +89,14 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 @media (max-width: 600px) { .topbar { flex-wrap: wrap; gap: 8px; padding: 10px 16px; } .nav { margin-left: 0; } }
 .s-high { background: var(--ai); border-radius: 3px; }
 .s-mid { background: var(--mid); border-radius: 3px; }
-.w { border-bottom: 2px dotted var(--hl-word); cursor: pointer; border-radius: 2px; }
-.w:hover, .w.active { background: color-mix(in srgb, var(--hl-word) 18%, transparent); }
-.w.sev-high { border-bottom-style: solid; }
-.w.applied { border-bottom: 2px solid var(--ok); background: var(--applied); }
+/* words with suggestions: highlighted chip + ▾ so it's obvious you can tap them */
+.w { background: var(--word-bg); color: var(--word-ink); border-bottom: 2px solid var(--hl-word); border-radius: 4px; padding: 0 2px; cursor: pointer; transition: background .15s; -webkit-tap-highlight-color: transparent; }
+.w::after { content: "\25BE"; font: 700 .7em/1 system-ui, sans-serif; margin-left: 2px; color: var(--hl-word); vertical-align: .1em; }
+.w.sev-medium { background: var(--word-bg-soft); border-bottom-style: dashed; }
+.w:hover, .w.active { background: var(--word-bg-hover); }
+.w.active { outline: 2px solid var(--hl-word); outline-offset: 1px; }
+.w.applied { background: var(--applied); color: inherit; border-bottom-color: var(--ok); }
+.w.applied::after { content: "\2713"; color: var(--ok); }
 .stale { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--mid); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; font-size: 14px; }
 
 .score-card { display: flex; gap: 16px; align-items: center; }
@@ -111,7 +119,9 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .sugg-list li.done { color: var(--ok); text-decoration: line-through; }
 
 .pop { position: absolute; z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.18); min-width: 230px; max-width: 320px; padding: 6px; font-size: 14px; }
-.pop .why { color: var(--muted); font-size: 12px; padding: 6px 8px 4px; }
+.pop .pop-head { padding: 6px 8px 0; font-size: 13.5px; }
+.pop .why { color: var(--muted); font-size: 12px; padding: 2px 8px 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+@media (max-width: 600px) { .pop { max-width: calc(100vw - 16px); } .pop button { padding: 10px 12px; } }
 .pop button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 7px 10px; border-radius: 6px; }
 .pop button:hover, .pop button:focus { background: color-mix(in srgb, var(--accent) 12%, transparent); outline: none; }
 .pop .orig { color: var(--muted); border-top: 1px solid var(--line); margin-top: 4px; border-radius: 0 0 6px 6px; }
