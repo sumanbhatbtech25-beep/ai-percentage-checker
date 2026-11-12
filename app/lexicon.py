@@ -1,0 +1,220 @@
+"""Words and phrases that large language models overuse, with plainer alternatives.
+
+Sources: Kobak et al. 2024 ("Delving into ChatGPT usage in academic writing
+through excess vocabulary"), Liang et al. 2024 (word-frequency shifts in
+peer reviews / papers after ChatGPT), plus commonly reported LLM stock phrases.
+Longer phrases are matched before single words.
+"""
+import re
+
+AI_PHRASES: dict[str, list[str]] = {
+    # --- multi-word stock phrases -------------------------------------------
+    "it is important to note that": ["note that", "keep in mind that", "remember that", ""],
+    "it's important to note that": ["note that", "keep in mind that", ""],
+    "it is worth noting that": ["note that", "notably,", ""],
+    "it's worth noting that": ["note that", ""],
+    "in today's fast-paced world": ["today", "these days", "now"],
+    "in today's digital age": ["today", "now that most things are online"],
+    "in the digital age": ["online", "today"],
+    "in the realm of": ["in", "within", "in the field of"],
+    "the realm of": ["the field of", "the area of", "the world of"],
+    "plays a crucial role in": ["matters for", "is key to", "shapes", "helps"],
+    "plays a pivotal role in": ["matters for", "is key to", "drives", "shapes"],
+    "plays a vital role in": ["matters for", "helps", "is key to"],
+    "play a crucial role in": ["matter for", "shape", "help"],
+    "play a pivotal role in": ["matter for", "shape", "drive"],
+    "a rich tapestry of": ["a mix of", "a range of", "many kinds of"],
+    "a testament to": ["proof of", "a sign of", "evidence of"],
+    "serves as a testament to": ["shows", "proves"],
+    "stands as a testament to": ["shows", "proves"],
+    "delve into": ["look into", "dig into", "explore", "examine"],
+    "delves into": ["looks at", "explores", "examines", "digs into"],
+    "delving into": ["looking at", "exploring", "digging into"],
+    "shed light on": ["explain", "clarify", "show", "reveal"],
+    "sheds light on": ["explains", "shows", "reveals"],
+    "pave the way for": ["lead to", "make room for", "open the door to"],
+    "paves the way for": ["leads to", "opens the door to"],
+    "navigate the complexities of": ["deal with", "work through", "handle"],
+    "the ever-evolving landscape of": ["the changing world of", "the shifting field of"],
+    "ever-evolving": ["changing", "shifting", "fast-moving"],
+    "ever-changing": ["changing", "shifting"],
+    "a wide range of": ["many", "all sorts of", "lots of"],
+    "a wide array of": ["many", "all kinds of"],
+    "a myriad of": ["many", "countless", "lots of"],
+    "a plethora of": ["many", "plenty of", "loads of"],
+    "at its core": ["basically", "at heart", "fundamentally"],
+    "when it comes to": ["for", "with", "on"],
+    "in conclusion": ["to sum up", "overall", "all in all", "so"],
+    "in summary": ["to sum up", "overall", "briefly"],
+    "to sum up": ["overall", "so", "all in all"],
+    "first and foremost": ["first", "above all"],
+    "not only": ["both", "not just"],
+    "on the other hand": ["but", "then again", "yet"],
+    "in order to": ["to", "so as to"],
+    "due to the fact that": ["because", "since"],
+    "a significant number of": ["many", "lots of"],
+    "it can be argued that": ["arguably,", "one could say", ""],
+    "foster a sense of": ["build", "create", "encourage"],
+    "embark on a journey": ["start", "set out", "begin"],
+    "cutting-edge": ["new", "latest", "advanced"],
+    "game-changer": ["big shift", "breakthrough", "major change"],
+    "thought-provoking": ["interesting", "challenging"],
+    "well-being": ["health", "welfare", "wellness"],
+    # --- single words ---------------------------------------------------------
+    "delve": ["dig", "look", "explore"],
+    "delves": ["digs", "looks", "explores"],
+    "tapestry": ["mix", "blend", "web", "patchwork"],
+    "realm": ["field", "area", "world"],
+    "intricate": ["complex", "detailed", "tangled"],
+    "intricacies": ["details", "ins and outs", "complexities"],
+    "pivotal": ["key", "central", "turning-point"],
+    "crucial": ["key", "important", "essential", "big"],
+    "crucially": ["importantly", "above all"],
+    "vital": ["key", "important", "needed"],
+    "paramount": ["most important", "top", "key"],
+    "meticulous": ["careful", "thorough", "precise"],
+    "meticulously": ["carefully", "thoroughly", "closely"],
+    "commendable": ["good", "admirable", "solid"],
+    "noteworthy": ["notable", "interesting", "worth mentioning"],
+    "notably": ["especially", "in particular", "for one"],
+    "showcase": ["show", "display", "present"],
+    "showcases": ["shows", "displays", "presents"],
+    "showcasing": ["showing", "displaying", "presenting"],
+    "underscore": ["stress", "highlight", "show"],
+    "underscores": ["stresses", "highlights", "shows"],
+    "underscoring": ["stressing", "highlighting", "showing"],
+    "highlighting": ["showing", "pointing out", "stressing"],
+    "bolster": ["boost", "support", "strengthen"],
+    "bolsters": ["boosts", "supports", "strengthens"],
+    "garner": ["gain", "get", "win"],
+    "garnered": ["gained", "got", "won", "drew"],
+    "foster": ["build", "encourage", "grow"],
+    "fosters": ["builds", "encourages", "grows"],
+    "fostering": ["building", "encouraging", "growing"],
+    "elevate": ["raise", "lift", "improve"],
+    "elevates": ["raises", "lifts", "improves"],
+    "embark": ["start", "begin", "set out"],
+    "endeavor": ["effort", "attempt", "project"],
+    "endeavors": ["efforts", "attempts", "projects"],
+    "harness": ["use", "tap", "put to work"],
+    "harnessing": ["using", "tapping", "putting to work"],
+    "leverage": ["use", "draw on", "make use of"],
+    "leveraging": ["using", "drawing on"],
+    "leveraged": ["used", "drew on"],
+    "utilize": ["use", "employ"],
+    "utilizes": ["uses", "employs"],
+    "utilizing": ["using", "employing"],
+    "utilization": ["use", "usage"],
+    "navigate": ["handle", "deal with", "work through", "get through"],
+    "navigating": ["handling", "dealing with", "working through"],
+    "landscape": ["field", "scene", "situation", "world"],
+    "multifaceted": ["complex", "many-sided", "varied"],
+    "nuanced": ["subtle", "detailed", "fine-grained"],
+    "profound": ["deep", "major", "strong"],
+    "profoundly": ["deeply", "greatly", "strongly"],
+    "robust": ["strong", "solid", "sturdy"],
+    "seamless": ["smooth", "easy", "effortless"],
+    "seamlessly": ["smoothly", "easily", "without a hitch"],
+    "testament": ["proof", "sign", "evidence"],
+    "transformative": ["game-changing", "major", "far-reaching"],
+    "vibrant": ["lively", "colorful", "busy"],
+    "holistic": ["whole", "complete", "all-round"],
+    "interplay": ["mix", "interaction", "back-and-forth"],
+    "encompass": ["cover", "include", "span"],
+    "encompasses": ["covers", "includes", "spans"],
+    "encompassing": ["covering", "including", "spanning"],
+    "facilitate": ["help", "ease", "enable", "make possible"],
+    "facilitates": ["helps", "eases", "enables"],
+    "optimize": ["improve", "fine-tune", "make the most of"],
+    "streamline": ["simplify", "speed up", "trim"],
+    "synergy": ["teamwork", "cooperation", "combined effect"],
+    "paradigm": ["model", "pattern", "approach"],
+    "groundbreaking": ["new", "pioneering", "original"],
+    "innovative": ["new", "creative", "fresh", "original"],
+    "insightful": ["sharp", "perceptive", "useful"],
+    "enhance": ["improve", "boost", "add to"],
+    "enhances": ["improves", "boosts", "adds to"],
+    "enhancing": ["improving", "boosting"],
+    "enhanced": ["improved", "better", "boosted"],
+    "moreover": ["also", "besides", "on top of that", "plus"],
+    "furthermore": ["also", "besides", "what's more"],
+    "additionally": ["also", "plus", "on top of that"],
+    "consequently": ["so", "as a result", "because of this"],
+    "nonetheless": ["still", "even so", "yet"],
+    "nevertheless": ["still", "even so", "yet"],
+    "ultimately": ["in the end", "finally", "after all"],
+    "essentially": ["basically", "in effect", "really"],
+    "significantly": ["greatly", "a lot", "clearly", "sharply"],
+    "comprehensive": ["full", "thorough", "complete", "broad"],
+    "invaluable": ["very useful", "priceless", "essential"],
+    "unwavering": ["steady", "firm", "constant"],
+    "plethora": ["lot", "load", "wealth"],
+    "myriad": ["many", "countless", "lots of"],
+    "akin": ["similar", "like", "close"],
+    "amidst": ["amid", "among", "during"],
+    "beacon": ["guide", "example", "light"],
+    "captivating": ["gripping", "engaging", "absorbing"],
+    "resonate": ["connect", "strike a chord", "ring true"],
+    "resonates": ["connects", "strikes a chord", "rings true"],
+    "unveil": ["reveal", "show", "launch"],
+    "unravel": ["untangle", "figure out", "work out"],
+    "unlock": ["open up", "release", "reach"],
+    "empower": ["enable", "help", "equip"],
+    "empowering": ["enabling", "helping", "equipping"],
+    "enrich": ["improve", "add to", "deepen"],
+    "poised": ["set", "ready", "about"],
+    "nestled": ["tucked", "set", "sitting"],
+    "bustling": ["busy", "lively", "crowded"],
+    "interwoven": ["linked", "tied together", "mixed"],
+    "embrace": ["accept", "adopt", "welcome", "take up"],
+    "embracing": ["accepting", "adopting", "taking up"],
+    "align": ["fit", "match", "line up"],
+    "aligns": ["fits", "matches", "lines up"],
+    "ensure": ["make sure", "check", "guarantee"],
+    "ensuring": ["making sure", "checking"],
+    "dynamic": ["changing", "lively", "active"],
+    "journey": ["path", "process", "experience", "trip"],
+    "intriguing": ["interesting", "curious", "odd"],
+    "invariably": ["always", "every time"],
+    "arguably": ["perhaps", "maybe", "possibly"],
+    "pertaining": ["about", "relating", "on"],
+    "commence": ["start", "begin"],
+    "subsequently": ["later", "then", "afterwards"],
+    "thereby": ["so", "which", "and so"],
+    "overarching": ["main", "general", "big-picture"],
+    "underpinning": ["behind", "supporting", "basis of"],
+    "underpins": ["supports", "drives", "is behind"],
+    "realm's": ["field's"],
+}
+
+# Compile one regex: longest phrases first so they win over single words.
+_sorted_keys = sorted(AI_PHRASES.keys(), key=len, reverse=True)
+LEXICON_RE = re.compile(
+    r"(?<![A-Za-z'-])(" + "|".join(re.escape(k) for k in _sorted_keys) + r")(?![A-Za-z'-])",
+    re.IGNORECASE,
+)
+
+
+def find_lexicon_hits(text: str) -> list[tuple[int, int, str]]:
+    """Return (start, end, matched_text) for every AI-typical phrase in text."""
+    return [(m.start(), m.end(), m.group(0)) for m in LEXICON_RE.finditer(text)]
+
+
+def alternatives_for(phrase: str) -> list[str]:
+    return AI_PHRASES.get(phrase.lower(), [])
+
+
+STOPWORDS = set(
+    """a about above after again against all am an and any are aren't as at be because been before
+    being below between both but by can can't cannot could couldn't did didn't do does doesn't doing
+    don't down during each few for from further had hadn't has hasn't have haven't having he he'd
+    he'll he's her here here's hers herself him himself his how how's i i'd i'll i'm i've if in into
+    is isn't it it's its itself let's me more most mustn't my myself no nor not of off on once only
+    or other ought our ours ourselves out over own same shan't she she'd she'll she's should
+    shouldn't so some such than that that's the their theirs them themselves then there there's
+    these they they'd they'll they're they've this those through to too under until up very was
+    wasn't we we'd we'll we're we've were weren't what what's when when's where where's which while
+    who who's whom why why's with won't would wouldn't you you'd you'll you're you've your yours
+    yourself yourselves also just may might must shall will would one two three many much like
+    said says say get got make made way well even still yet""".split()
+)

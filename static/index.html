@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Percentage Checker</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◎</span> AI Percentage Checker</div>
+  <div id="status" class="status loading">Loading detection models…</div>
+</header>
+
+<main>
+  <!-- STEP 1: submit -->
+  <section id="submit" class="card">
+    <h1>Check your work for AI writing</h1>
+    <p class="muted">Upload a .docx, .pdf or .txt file, or paste your text. Analysis runs on this computer — nothing is sent anywhere else.</p>
+    <label id="drop" class="drop">
+      <input id="file" type="file" accept=".docx,.pdf,.txt,.md" hidden>
+      <strong>Drop a file here</strong> or click to browse
+      <span id="filename" class="muted"></span>
+    </label>
+    <textarea id="input" placeholder="…or paste your text here (300+ words gives the most reliable result)"></textarea>
+    <div class="row">
+      <label class="mode">Strictness
+        <select id="mode">
+          <option value="very_hard" selected>Very hard (strictest)</option>
+          <option value="strict">Strict</option>
+          <option value="standard">Standard</option>
+        </select>
+      </label>
+      <span id="wc" class="muted">0 words</span>
+      <button id="check" class="primary" disabled>Check for AI</button>
+    </div>
+  </section>
+
+  <!-- STEP 2: report -->
+  <section id="report" hidden>
+    <div class="report-grid">
+      <div class="doc-col">
+        <div class="doc-toolbar">
+          <div class="legend">
+            <span><i class="sw high"></i>Likely AI</span>
+            <span><i class="sw mid"></i>Borderline</span>
+            <span><i class="uline"></i>Click to change word</span>
+          </div>
+          <div class="tools">
+            <button id="editToggle">Edit text</button>
+            <button id="newDoc">New document</button>
+          </div>
+        </div>
+        <div id="stale" class="stale" hidden>
+          <span id="staleMsg"></span>
+          <button id="recheck" class="primary small">Re-check score</button>
+        </div>
+        <article id="doc" class="doc"></article>
+        <textarea id="editor" class="doc editor" hidden></textarea>
+      </div>
+
+      <aside class="side">
+        <div class="card score-card">
+          <div class="gauge" id="gauge">
+            <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle id="arc" cx="60" cy="60" r="52" class="arc"/></svg>
+            <div class="gauge-label"><span id="pct">0</span><small>%</small></div>
+          </div>
+          <div class="score-text">
+            <div class="big">of text likely AI-generated</div>
+            <div class="muted" id="scoreMeta"></div>
+          </div>
+        </div>
+        <div id="warnings"></div>
+
+        <div class="card">
+          <h3>Detector breakdown</h3>
+          <div class="sig"><span>Deep classifier (DeBERTa)</span><b id="sigCls"></b></div>
+          <div class="bar"><i id="barCls"></i></div>
+          <div class="sig"><span>Binoculars (zero-shot LLM)</span><b id="sigBino"></b></div>
+          <div class="bar"><i id="barBino"></i></div>
+          <div class="sig"><span>Style (AI vocabulary, rhythm)</span><b id="sigStyle"></b></div>
+          <div class="bar"><i id="barStyle"></i></div>
+          <p class="muted tiny">Each window of ~200 words is scored by all three; the strictness setting decides how they combine. Sentences inherit the score of every window that contains them.</p>
+        </div>
+
+        <div class="card">
+          <h3>Suggestions <span id="suggCount" class="pill"></span></h3>
+          <p class="muted tiny">Click any underlined word in the document to pick a replacement. Then press <b>Re-check score</b>.</p>
+          <ol id="suggList" class="sugg-list"></ol>
+        </div>
+
+        <div class="card">
+          <h3>Download revised text</h3>
+          <div class="row"><button id="dlDocx">.docx</button><button id="dlTxt">.txt</button><button id="copy">Copy</button></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<div id="pop" class="pop" hidden></div>
+<div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyMsg">Analyzing…</div></div>
+
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>
