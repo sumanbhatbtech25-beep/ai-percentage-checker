@@ -42,6 +42,8 @@ Binoculars (Qwen2.5-1.5B pair): human mean 1.018, AI mean 0.870. The threshold a
 
 **Word-swap experiment:** applying every suggested replacement to a 158-word ChatGPT paragraph lowered Binoculars from 29% → 11% and style from 100% → 48%. The **deep classifier stayed at 100%**. Swapping vocabulary alone doesn't beat a strong supervised detector, and probably doesn't beat Turnitin either. To get a lower score, sentence structure and voice have to change, not only individual words. Calibration data is 2022-era ChatGPT, so newer models may score differently.
 
+**Paragraph-rewrite experiment:** for each paragraph, the Qwen2.5-1.5B-Instruct model writes 3 rewrites with different style briefs, and each is re-scored. On a ChatGPT paragraph, the rewrites cut Binoculars from 51% to 1–10% and style from 100% to about 40–50%. The classifier stayed at about 100%, because the rewrites are AI text too. The UI labels them honestly as starting points. Blocking AI-typical words during generation (`bad_words_ids`) produced broken words ("fosts"), so that was dropped.
+
 ## 6. Honest limitations
 
 * No detector is proof. Turnitin itself says its score shouldn't be the only basis for academic action.

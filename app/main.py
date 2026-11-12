@@ -11,6 +11,8 @@ from . import config
 from .detector import analyze
 from .extract import extract_text, text_to_docx
 from .models import DEVICE, get_models
+from .papers import find_similar
+from .rewrite import rewrite_paragraph
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 app = FastAPI(title="AI Percentage Checker")
@@ -55,6 +57,35 @@ def analyze_ep(body: AnalyzeIn):
     if not body.text.strip():
         raise HTTPException(400, "No text")
     return analyze(body.text, body.mode)
+
+
+class RewriteIn(BaseModel):
+    text: str
+    mode: str = "very_hard"
+
+
+@app.post("/api/rewrite")
+def rewrite_ep(body: RewriteIn):
+    if len(body.text.split()) < 8:
+        raise HTTPException(400, "Paragraph too short to rewrite")
+    return rewrite_paragraph(body.text[:6000], body.mode)
+
+
+class PapersIn(BaseModel):
+    text: str = ""
+    query: str = ""
+
+
+@app.post("/api/papers")
+def papers_ep(body: PapersIn):
+    if len(body.text.split()) < 5 and not body.query.strip():
+        raise HTTPException(400, "Paste your project text or type a topic to search.")
+    return find_similar(body.text[: config.MAX_CHARS] or body.query, query=body.query or None)
+
+
+@app.get("/papers")
+def papers_page():
+    return FileResponse(STATIC / "papers.html")
 
 
 @app.post("/api/export-docx")

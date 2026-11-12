@@ -150,7 +150,7 @@ def analyze(text: str, mode: str = "very_hard", with_suggestions: bool = True) -
             f"Only {total_words} words. Detectors (including Turnitin, which needs 300+) are unreliable on short text."
         )
     if not sents:
-        return {"ai_percent": 0, "mode": mode, "word_count": 0, "sentences": [], "suggestions": [], "warnings": warnings, "signals": {}}
+        return {"ai_percent": 0, "mode": mode, "word_count": 0, "sentences": [], "paragraphs": [], "suggestions": [], "warnings": warnings, "signals": {}, "threshold": MODES[mode]["threshold"]}
 
     m = get_models()
     windows = build_windows(sents)
@@ -210,11 +210,69 @@ def analyze(text: str, mode: str = "very_hard", with_suggestions: bool = True) -
             {"start": s.start, "end": s.end, "score": round(sc, 3), "flagged": sc >= thr}
             for s, sc in zip(sents, sent_scores)
         ],
+        "paragraphs": paragraph_scores(text, sents, sent_scores, thr),
         "suggestions": [],
     }
     if with_suggestions:
         result["suggestions"] = build_suggestions(text, sents, sent_scores, thr, token_probs)
     return result
+
+
+# --------------------------------------------------------------------------- paragraphs
+def paragraph_scores(text, sents, sent_scores, thr):
+    """Per-paragraph AI % (share of words in flagged sentences) and mean score."""
+    paras = []
+    for pm in re.finditer(r"[^\n]+", text):
+        a, b = pm.start(), pm.end()
+        inside = [(s, sc) for s, sc in zip(sents, sent_scores) if s.start >= a and s.end <= b]
+        words = sum(s.words for s, _ in inside)
+        if not words:
+            continue
+        flagged = sum(s.words for s, sc in inside if sc >= thr)
+        mean = sum(s.words * sc for s, sc in inside) / words
+        # trim surrounding whitespace so offsets match sentence spans
+        while a < b and text[a].isspace():
+            a += 1
+        while b > a and text[b - 1].isspace():
+            b -= 1
+        paras.append({
+            "start": a, "end": b, "words": words,
+            "ai_percent": round(100 * flagged / words), "score": round(mean, 3),
+            "reasons": paragraph_reasons(text[a:b], [s for s, _ in inside]),
+        })
+    return paras
+
+
+TRANSITIONS = re.compile(
+    r"^(moreover|furthermore|additionally|however|ultimately|overall|in conclusion|in summary|"
+    r"consequently|therefore|thus|nevertheless|nonetheless|notably|importantly|in addition|"
+    r"as a result|similarly|likewise|firstly|secondly|lastly|finally)\b",
+    re.I,
+)
+
+
+def paragraph_reasons(ptext: str, psents: list[Sentence]) -> list[str]:
+    """Plain-language explanations of what makes a paragraph read as AI, each with a fix."""
+    out = []
+    hits = [h[2] for h in find_lexicon_hits(ptext)]
+    if hits:
+        uniq = list(dict.fromkeys(h.lower() for h in hits))[:5]
+        out.append(f"Uses {len(hits)} AI-typical word(s)/phrase(s): {', '.join(uniq)}. Swap them for plain words.")
+    openers = [s.text.split(",")[0] for s in psents if TRANSITIONS.match(s.text)]
+    if len(openers) >= 2 or (openers and len(psents) <= 3):
+        out.append(f"{len(openers)} sentence(s) open with stock transitions ({', '.join(dict.fromkeys(openers))}). Start some sentences with the subject instead, or drop the transition.")
+    lens = [s.words for s in psents]
+    if len(lens) >= 3 and statistics.mean(lens) > 0:
+        cv = statistics.pstdev(lens) / statistics.mean(lens)
+        if cv < 0.35:
+            out.append(f"Sentences are all a similar length ({min(lens)}-{max(lens)} words). Human writing varies more: add a short sentence or split a long one.")
+    if not re.search(r"\d", ptext) and not re.search(r"(?<=[a-z,;] )[A-Z][a-z]+", ptext):
+        out.append("No specific examples, numbers, names or sources. Add a concrete detail from your own research or experience.")
+    if re.search(r"\b(not only|both)\b.+\bbut also\b", ptext, re.I) or len(re.findall(r"\b\w+, \w+,? and \w+\b", ptext)) >= 2:
+        out.append("Uses formulaic patterns (\"not only... but also\", lists of three). Rephrase one in your own way.")
+    if psents and statistics.mean(lens) > 24:
+        out.append("Long, evenly balanced sentences. Break one up.")
+    return out
 
 
 # --------------------------------------------------------------------------- suggestions

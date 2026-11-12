@@ -1,0 +1,24 @@
+.papers-main { max-width: 900px; }
+#text { width: 100%; min-height: 180px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: transparent; resize: vertical; }
+.query { flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: transparent; }
+.meta { margin: 4px 0 12px; }
+.meta .kw { display: inline-block; background: var(--line); border-radius: 99px; padding: 1px 8px; margin: 2px 3px 0 0; color: var(--ink); }
+.results { list-style: none; padding: 0; margin: 0; counter-reset: r; }
+.paper { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 14px; }
+.sim { text-align: center; }
+.sim b { display: block; font-size: 22px; line-height: 1.1; }
+.sim span { font-size: 11px; color: var(--muted); }
+.sim .ring { width: 56px; height: 56px; border-radius: 50%; display: grid; place-content: center; margin: 0 auto 2px;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--line) 0); }
+.sim .ring i { width: 44px; height: 44px; border-radius: 50%; background: var(--card); display: grid; place-content: center; font: 700 15px/1 system-ui, sans-serif; font-style: normal; }
+.paper h3 { margin: 0 0 4px; font-size: 16.5px; line-height: 1.35; }
+.paper h3 a { color: var(--ink); text-decoration: none; }
+.paper h3 a:hover { color: var(--accent); text-decoration: underline; }
+.paper .by { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.paper .abs { font-size: 14px; line-height: 1.55; margin: 6px 0; }
+.paper .abs.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.paper .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; align-items: center; }
+.paper .links a { color: var(--accent); }
+.paper .links button { padding: 2px 8px; font-size: 12.5px; }
+.tag { display: inline-block; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); border-radius: 99px; padding: 0 8px; font-size: 12px; margin-right: 4px; }
+@media (max-width: 600px) { .paper { grid-template-columns: 1fr; } .sim { text-align: left; display: flex; align-items: center; gap: 10px; } .sim .ring { margin: 0; } }

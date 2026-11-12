@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Similar Papers</title>
+  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/papers.css?v=1">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◎</span> AI Percentage Checker</div>
+  <nav class="nav"><a href="/">AI Checker</a><a href="/papers" class="on">Similar Papers</a></nav>
+</header>
+
+<main class="papers-main">
+  <section class="card">
+    <h1>Find the 5 most similar research papers</h1>
+    <p class="muted">Paste your project or upload it. Key terms are pulled out on this computer, and only those short searches go to the free <b>OpenAlex</b> and <b>Semantic Scholar</b> databases. Your text is never uploaded. Results are then ranked here by how close each paper's meaning is to yours.</p>
+    <label id="drop" class="drop">
+      <input id="file" type="file" accept=".docx,.pdf,.txt,.md" hidden>
+      <strong>Drop a file here</strong> or click to browse
+      <span id="filename" class="muted"></span>
+    </label>
+    <textarea id="text" placeholder="Paste your project / abstract / essay here…"></textarea>
+    <div class="row">
+      <input id="query" class="query" placeholder="Optional: type your own search topic instead (e.g. federated learning for medical imaging)">
+      <button id="search" class="primary">Find similar papers</button>
+    </div>
+    <div id="fromChecker" class="muted tiny" hidden>Loaded the text from your last AI check.</div>
+  </section>
+
+  <section id="out" hidden>
+    <div id="meta" class="meta muted tiny"></div>
+    <div id="errors"></div>
+    <ol id="results" class="results"></ol>
+  </section>
+</main>
+
+<div id="busy" class="busy" hidden><div class="spinner"></div><div>Searching papers and ranking by similarity…</div></div>
+<script src="/static/papers.js?v=1"></script>
+</body>
+</html>
