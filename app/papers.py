@@ -186,7 +186,35 @@ def _norm_title(t: str) -> str:
 
 
 # --------------------------------------------------------------------------- main
+# Searches are cached so the Research Papers page and the similarity check on the
+# same report don't spend the free OpenAlex budget twice (no key = small daily limit).
+_cache: dict[tuple, tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
+
+
 def find_similar(text: str, top: int = 5, query: str | None = None) -> dict:
+    import copy
+    import hashlib
+    import time
+
+    # always fetch 10 so the papers page (top 5) and similarity check (top 10) share one search
+    key = (hashlib.sha1(text.strip().encode("utf-8", "ignore")).hexdigest(), (query or "").strip())
+    with _cache_lock:
+        hit = _cache.get(key)
+        res = copy.deepcopy(hit[1]) if hit and hit[0] > time.time() else None
+    if res is None:
+        res = _find_similar(text, max(top, 10), query)
+        if res.get("papers"):
+            ttl = 300 if res.get("errors") else 3600  # retry sooner when a source was rate-limited
+            with _cache_lock:
+                _cache[key] = (time.time() + ttl, copy.deepcopy(res))
+                if len(_cache) > 64:
+                    _cache.pop(min(_cache, key=lambda k: _cache[k][0]))
+    res["papers"] = res.get("papers", [])[:top]
+    return res
+
+
+def _find_similar(text: str, top: int = 5, query: str | None = None) -> dict:
     text = text.strip()
     from .compare import _sentences  # lazy: compare imports this module
 

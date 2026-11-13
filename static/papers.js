@@ -109,14 +109,14 @@ function card(p, i) {
   return `<li class="paper">
     <div class="sim"><div class="ring" style="--p:${pct}"><i>${pct}%</i></div><span>similar</span></div>
     <div>
-      <h3>${i + 1}. <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
+      <h3>${i + 1}. <a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
       <div class="by">${authors} · ${p.year ?? "n.d."}${p.venue ? " · " + esc(p.venue) : ""} · ${p.citations} citations</div>
       ${p.shared_terms.length ? `<div>${p.shared_terms.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       <p class="abs clamp">${esc(p.abstract)}</p>
       <div class="links">
         <button class="more">Show full abstract</button>
-        <a href="${esc(p.url)}" target="_blank" rel="noopener">Open paper ↗</a>
-        ${p.pdf ? `<a href="${esc(p.pdf)}" target="_blank" rel="noopener">Free PDF ↗</a>` : ""}
+        <a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener">Open paper ↗</a>
+        ${p.pdf ? `<a href="${esc(safeUrl(p.pdf))}" target="_blank" rel="noopener">Free PDF ↗</a>` : ""}
         <span class="muted">via ${esc(p.source)}</span>
       </div>
       <div class="cmp-actions">

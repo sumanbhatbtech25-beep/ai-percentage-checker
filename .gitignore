@@ -2,4 +2,5 @@
 __pycache__/
 *.pyc
 eval_cache.json
+# legacy location of saved reports (they now live in %LOCALAPPDATA%/ReportProgram)
 data/

@@ -2,12 +2,12 @@
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, reports
+from . import access, config, reports, security, similarity
 from .detector import analyze
 from .extract import extract_text, text_to_docx
 from .models import DEVICE, get_models
@@ -16,11 +16,35 @@ from .papers import find_similar
 from .rewrite import rewrite_paragraph
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
-app = FastAPI(title="AI Percentage Checker")
+access.check_password_strength()  # refuse to start phone mode with a weak password
+# API docs pages are switched off: nobody needs them, and they map out the API.
+app = FastAPI(title="Report Program", docs_url=None, redoc_url=None, openapi_url=None)
+# Middleware runs last-added-first: host/origin checks and headers wrap everything,
+# then the phone-mode password check.
+app.middleware("http")(access.middleware)
+app.middleware("http")(security.middleware)
+
+
+@app.get("/login")
+def login_form(next: str = "/"):
+    return access.login_page(next)
+
+
+@app.post("/login")
+async def login_post(request: Request):
+    return await access.login_submit(request)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    return access.logout(request)
 
 
 @app.on_event("startup")
 def _warm():
+    moved = reports.migrate_legacy()  # move any reports out of the OneDrive project folder
+    if moved:
+        print(f"[reports] moved {moved} saved report(s) to {reports.DIR} (encrypted)")
     # load models in the background so the page opens immediately
     threading.Thread(target=get_models, daemon=True).start()
 
@@ -35,22 +59,30 @@ class ExportIn(BaseModel):
 
 
 @app.get("/api/health")
-def health():
+def health(request: Request):
     from . import models
 
-    return {"ready": models._models is not None, "device": DEVICE}
+    # "remote" tells a logged-in phone to show a Log out link
+    return {"ready": models._models is not None, "device": DEVICE,
+            "remote": access.enabled() and not access.is_local(request)}
 
 
 @app.post("/api/extract")
 async def extract(file: UploadFile = File(...)):
-    data = await file.read()
-    if len(data) > 20 * 1024 * 1024:
+    limit = 20 * 1024 * 1024
+    name = (file.filename or "").lower()
+    if not name.endswith((".docx", ".pdf", ".txt", ".md")):
+        raise HTTPException(400, "Upload a .docx, .pdf or .txt file")
+    data = await file.read(limit + 1)  # never read more than the limit into memory
+    if len(data) > limit:
         raise HTTPException(413, "File too large (20 MB max)")
     try:
-        text = extract_text(file.filename or "", data)
+        text = extract_text(name, data)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"text": text[: config.MAX_CHARS], "filename": file.filename}
+    except Exception:  # corrupt or malicious file: fail safely, reveal nothing
+        raise HTTPException(400, "Couldn't read that file. Is it a valid .docx, .pdf or .txt?")
+    return {"text": text[: config.MAX_CHARS], "filename": (file.filename or "")[:200]}
 
 
 @app.post("/api/analyze")
@@ -82,6 +114,17 @@ def papers_ep(body: PapersIn):
     if len(body.text.split()) < 5 and not body.query.strip():
         raise HTTPException(400, "Paste your project text or type a topic to search.")
     return find_similar(body.text[: config.MAX_CHARS] or body.query, query=body.query or None)
+
+
+class SimilarityIn(BaseModel):
+    text: str
+
+
+@app.post("/api/similarity")
+def similarity_ep(body: SimilarityIn):
+    if len(body.text.split()) < 40:
+        raise HTTPException(400, "Paste or upload your full report first.")
+    return similarity.check(body.text[: config.MAX_CHARS])
 
 
 class CompareIn(BaseModel):
@@ -131,6 +174,18 @@ def reports_save(body: ReportIn):
         return reports.save_report(body.text, body.mode, body.id, body.title, body.ai_percent)
     except ValueError:
         raise HTTPException(400, "Invalid report id")
+
+
+class RenameIn(BaseModel):
+    title: str
+
+
+@app.patch("/api/reports/{report_id}")
+def reports_rename(report_id: str, body: RenameIn):
+    try:
+        return reports.rename_report(report_id, body.title)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "Report not found")
 
 
 @app.delete("/api/reports/{report_id}")

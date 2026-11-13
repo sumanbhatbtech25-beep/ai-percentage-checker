@@ -111,6 +111,7 @@ function renderAll() {
   renderSuggList();
   renderParaList();
   renderStale();
+  renderUndoRedo();
 }
 
 function renderScore() {
@@ -304,6 +305,7 @@ async function generateRewrites(i) {
 }
 
 function useRewrite(i, k) {
+  pushHistory();
   const r = state.result;
   const p = r.paragraphs[i];
   const c = state.panels[i].data.candidates[k];
@@ -408,6 +410,7 @@ window.addEventListener("beforeunload", (e) => {
 function renderStale() {
   try { sessionStorage.setItem("aic_text", state.text); } catch {}
   autoSave();
+  if (state.sim) renderSimilarity(); // shows a 'text changed, run again' note after edits
   const n = state.edits;
   $("stale").hidden = n === 0;
   $("staleMsg").textContent = state.undo
@@ -504,6 +507,7 @@ document.addEventListener("mousedown", (e) => {
 });
 
 function applyReplacement(i, value, silent = false) {
+  if (!silent) pushHistory();
   const r = state.result;
   const g = r.suggestions[i];
   let { start, end } = g;
@@ -533,6 +537,147 @@ function applyReplacement(i, value, silent = false) {
   renderStale();
 }
 
+// ------------------------------------------------------------------ similarity check
+state.sim = null;
+
+async function runSimilarity() {
+  const btn = $("simRun"), out = $("simOut");
+  btn.disabled = true;
+  btn.textContent = "Checking… (about 10–20 s)";
+  out.innerHTML = "";
+  try {
+    const r = await fetch("/api/similarity", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: state.text }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "Similarity check failed");
+    state.sim = { ...j, text: state.text };
+    renderSimilarity();
+  } catch (e) {
+    out.innerHTML = `<div class="warn">${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Run again";
+  }
+}
+
+function renderSimilarity() {
+  const j = state.sim, out = $("simOut");
+  if (!j) return;
+  if (j.error) { out.innerHTML = `<div class="warn">${esc(j.error)}</div>`; return; }
+  const stale = j.text !== state.text ? `<p class="muted tiny">Your text has changed since this check. Run it again for up-to-date results.</p>` : "";
+  const serious = j.matches.filter((m) => m.kind !== "similar");
+  const head = serious.length
+    ? `<div class="sim-summary"><b>${j.matched_percent}%</b> of your prose matches published papers · ` +
+      `<span class="${j.uncited_count ? "sim-bad" : "sim-good"}">${j.uncited_count ? `${j.uncited_count} without a citation` : "all cited"}</span></div>`
+    : `<div class="sim-summary sim-good"><b>No copied or closely paraphrased sentences found.</b>${j.matches.length ? " Some sentences share common ideas with papers (below); that's normal." : ""}</div>`;
+  const items = j.matches.map((m, k) => `
+    <li class="sim-item ${m.kind === "similar" ? "similar" : m.cited ? "" : "uncited"}">
+      <button class="sim-toggle" data-k="${k}" aria-expanded="false">
+        <span class="badge ${m.kind === "copied" ? "high" : m.kind === "paraphrase" ? "mid" : "none"}">${{ copied: "Copied", paraphrase: "Close paraphrase", similar: "Similar idea" }[m.kind]} · ${Math.round(m.similarity * 100)}%</span>
+        ${m.kind === "similar" ? "" : m.cited ? `<span class="badge low">cited</span>` : `<span class="badge none">no citation</span>`}
+        <span class="sim-snip">${esc(m.sentence.slice(0, 70))}…</span>
+      </button>
+      <div class="sim-detail" hidden>
+        <div class="sim-pair"><span>Your sentence</span>${esc(m.sentence)}</div>
+        <div class="sim-pair"><span>Paper</span>${esc(m.source_sentence)}</div>
+        <div class="sim-src"><a href="${esc(safeUrl(m.paper.url))}" target="_blank" rel="noopener">${esc(m.paper.title)}</a>` +
+        `${m.paper.year ? ` (${m.paper.year})` : ""}${m.paper.authors.length ? ` · ${esc(m.paper.authors.join(", "))}` : ""}</div>
+        <div class="sim-tip">${m.kind === "similar"
+          ? "Probably fine: this is a common idea in common words. Cite the paper if you actually drew on it."
+          : m.cited
+          ? "You cite a source here. Make sure it's this paper, and use quotation marks if the wording is copied."
+          : m.kind === "copied"
+            ? "Put this in quotation marks and cite the paper, or rewrite it in your own words and cite it."
+            : "Rewrite this in your own words and add a citation to the paper."}</div>
+        <button class="small sim-goto" data-start="${m.start}">Show in document</button>
+      </div>
+    </li>`).join("");
+  out.innerHTML = head + stale + (items ? `<ol class="sim-list">${items}</ol>` : "") +
+    `<p class="muted tiny sim-scope">Compared with the abstracts of ${j.papers_checked} papers found on OpenAlex and Semantic Scholar. ` +
+    `This can't search the whole web or other students' work the way Turnitin does.</p>`;
+}
+
+$("simRun").addEventListener("click", runSimilarity);
+$("simOut").addEventListener("click", (e) => {
+  const t = e.target.closest(".sim-toggle");
+  if (t) {
+    const d = t.nextElementSibling;
+    d.hidden = !d.hidden;
+    t.setAttribute("aria-expanded", String(!d.hidden));
+    return;
+  }
+  const g = e.target.closest(".sim-goto");
+  if (g) showInDocument(+g.dataset.start);
+});
+
+// Scroll to (and briefly flash) the paragraph containing character offset `pos`.
+function showInDocument(pos) {
+  const paras = state.result?.paragraphs || [];
+  const i = paras.findIndex((p) => p.start <= pos && pos < p.end + 1);
+  if (i < 0) return;
+  if (state.view !== "all" && !isFlagged(paras[i], i)) setView("all");
+  const el = $("para-" + i);
+  if (!el) return;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.classList.remove("flash");
+  void el.offsetWidth;
+  el.classList.add("flash");
+}
+
+// ------------------------------------------------------------------ undo / redo
+// Each snapshot pairs the text with the analysis it was shown with, so restoring
+// one always gives a consistent view (even across re-checks).
+const HISTORY_MAX = 60;
+state.history = [];
+state.future = [];
+
+function snapshot() {
+  return { text: state.text, result: structuredClone(state.result), edits: state.edits, undo: state.undo, fixedCount: state.fixedCount };
+}
+
+function pushHistory() {
+  if (!state.result) return;
+  state.history.push(snapshot());
+  if (state.history.length > HISTORY_MAX) state.history.shift();
+  state.future = [];
+  renderUndoRedo();
+}
+
+function restore(s) {
+  Object.assign(state, { text: s.text, result: s.result, edits: s.edits, undo: s.undo, fixedCount: s.fixedCount, panels: {} });
+  closePop();
+  renderAll();
+}
+
+function undo() {
+  if (!state.history.length) return;
+  state.future.push(snapshot());
+  restore(state.history.pop());
+}
+
+function redo() {
+  if (!state.future.length) return;
+  state.history.push(snapshot());
+  restore(state.future.pop());
+}
+
+function renderUndoRedo() {
+  if (!$("undoBtn")) return;
+  $("undoBtn").disabled = !state.history.length;
+  $("redoBtn").disabled = !state.future.length;
+}
+
+$("undoBtn")?.addEventListener("click", undo);
+$("redoBtn")?.addEventListener("click", redo);
+document.addEventListener("keydown", (e) => {
+  if (!EDITOR || state.editing || !(e.ctrlKey || e.metaKey)) return;
+  if (e.target.closest && e.target.closest("input, textarea, select")) return; // let text fields keep their own undo
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+});
+
 // ------------------------------------------------------------------ fix all
 // Swap every highlighted word/phrase for its top suggestion in one go (undoable).
 function pendingFixes() {
@@ -546,6 +691,7 @@ function fixAll() {
   if (state.editing) finishEditing();
   const todo = pendingFixes();
   if (!todo.length) return;
+  pushHistory();
   state.undo = { text: state.text, result: structuredClone(state.result), edits: state.edits };
   // apply from the end of the text backwards so earlier offsets stay valid
   for (const { g, i } of todo.slice().reverse()) {
@@ -559,6 +705,7 @@ function fixAll() {
 
 function undoFixAll() {
   if (!state.undo) return;
+  pushHistory();
   Object.assign(state, { text: state.undo.text, result: state.undo.result, edits: state.undo.edits, undo: null, fixedCount: 0 });
   closePop();
   renderAll();
@@ -591,6 +738,7 @@ function finishEditing() {
   state.editing = false;
   const t = $("editor").value;
   if (t !== state.text) {
+    pushHistory();
     state.text = t;
     // offsets are no longer valid: show plain text until re-check
     state.result.sentences = [];
@@ -608,7 +756,8 @@ $("newDoc").addEventListener("click", () => {
   if (hasUnsaved() && !confirm("You have unsaved changes. Start a new document anyway?")) return;
   $("report").hidden = true; $("submit").hidden = false;
   $("input").value = ""; $("filename").textContent = "";
-  Object.assign(state, { reportId: null, title: "", savedText: "", result: null, edits: 0, undo: null });
+  Object.assign(state, { reportId: null, title: "", savedText: "", result: null, edits: 0, undo: null, history: [], future: [], sim: null });
+  $("simOut").innerHTML = ""; $("simRun").textContent = "Run similarity check";
   const url = new URL(location.href); url.searchParams.delete("report"); history.replaceState(null, "", url);
   renderSaveStatus();
   updateCheckBtn();

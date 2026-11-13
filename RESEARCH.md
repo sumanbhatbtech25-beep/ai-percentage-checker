@@ -80,7 +80,21 @@ The cause was the DeBERTa classifier, which rated 48% of human student-essay sec
 
 Re-run with `python -m app.evaluate collect` then `python -m app.evaluate report`, and tune with `python -m app.tune`.
 
-## 7. Honest limitations
+## 7. Re-test against 2026 AI models (Nov 2026)
+
+Added the `textsightai/ai-text-detection-benchmark-2026` sets: 56 texts from **Claude Opus 5, GPT-4.1, gpt-oss-120b, Claude Haiku 4.5 and Qwen 3.8**, plus human **non-native English academic writing** (the group detectors most often flag unfairly) and **pre-2022 Wikipedia**.
+
+| Balanced mode | Flagged ≥20% |
+|---|---|
+| Human: non-native academic writing | **0%** |
+| Human: Wikipedia, student essays, academic essays, arXiv | 0–3% |
+| AI: GPT-4.1, Claude Haiku 4.5 | 100% |
+| AI: gpt-oss-120b | 83–100% |
+| AI: **Claude Opus 5, Qwen 3.8** | **0%** |
+
+Opus 5 and Qwen 3.8 are close to invisible to every open detector used here. Binoculars rates them *more* human than human writing (1.065 vs 1.038), and the classifier's scores overlap heavily with real students' scores. Re-tuning on all sets confirmed that catching them costs too much: reaching 75% detection would flag up to 30% of human writers. **The settings were kept.** The fix is a classifier trained on modern AI text, which needs far more than 56 samples. The checker now tells users that a low score doesn't prove human writing.
+
+## 8. Honest limitations
 
 * No detector is proof. Turnitin itself says its score shouldn't be the only basis for academic action.
 * False positives hit non-native English writers and very formulaic writing harder.

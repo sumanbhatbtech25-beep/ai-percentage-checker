@@ -3,10 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/icon.png">
+  <script src="/static/boot.js?v=1"></script>
   <title>Report Program</title>
   <meta name="description" content="Check your report for AI writing, edit it in your own words, and find similar research papers.">
-  <link rel="stylesheet" href="/static/style.css?v=13">
-  <link rel="stylesheet" href="/static/home.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=18">
+  <link rel="stylesheet" href="/static/home.css?v=4">
 </head>
 <body>
 <header class="topbar">
@@ -24,8 +26,20 @@
 
   <section id="saved" class="saved" hidden aria-labelledby="savedTitle">
     <div class="saved-head">
-      <h2 id="savedTitle">Your saved reports</h2>
+      <h2 id="savedTitle">Your saved reports <span class="pill" id="savedCount"></span></h2>
       <span class="muted tiny">Stored on this computer until you delete them</span>
+    </div>
+    <div class="saved-tools">
+      <input id="savedSearch" type="search" placeholder="Search saved reports" aria-label="Search saved reports">
+      <label class="muted tiny">Sort
+        <select id="savedSort" aria-label="Sort saved reports">
+          <option value="updated">Recently saved</option>
+          <option value="title">Name (A–Z)</option>
+          <option value="ai_high">AI % (highest first)</option>
+          <option value="ai_low">AI % (lowest first)</option>
+          <option value="created">Oldest first</option>
+        </select>
+      </label>
     </div>
     <ul id="savedList" class="saved-list"></ul>
   </section>
@@ -89,18 +103,7 @@
   <p class="privacy muted tiny">🔒 Your report never leaves this computer. All detection and editing runs locally on your GPU. Only short keyword searches go to the paper databases.</p>
 </main>
 
-<script src="/static/nav.js?v=1"></script>
-<script src="/static/home.js?v=1"></script>
-<script>
-  (async function poll() {
-    try {
-      const r = await fetch("/api/health").then((r) => r.json());
-      const s = document.getElementById("status");
-      if (r.ready) { s.textContent = `Ready (${r.device.toUpperCase()})`; s.className = "status ready"; return; }
-      s.textContent = "Loading detection models…";
-    } catch {}
-    setTimeout(poll, 2000);
-  })();
-</script>
+<script src="/static/nav.js?v=3"></script>
+<script src="/static/home.js?v=3"></script>
 </body>
 </html>

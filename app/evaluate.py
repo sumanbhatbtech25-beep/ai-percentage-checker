@@ -28,10 +28,10 @@ CACHE = Path(__file__).resolve().parent.parent / "eval_cache.json"
 ROWS = "https://datasets-server.huggingface.co/rows?"
 
 
-def _rows(dataset: str, offset: int, length: int = 100) -> list[dict]:
+def _rows(dataset: str, offset: int, length: int = 100, config: str = "default") -> list[dict]:
     import time
 
-    q = urllib.parse.urlencode({"dataset": dataset, "config": "default", "split": "train", "offset": offset, "length": length})
+    q = urllib.parse.urlencode({"dataset": dataset, "config": config, "split": "train", "offset": offset, "length": length})
     for attempt in range(4):  # the datasets server sometimes answers 502 under load
         try:
             with urllib.request.urlopen(ROWS + q, timeout=60) as r:
@@ -81,6 +81,15 @@ def load_sets(n: int = 60) -> dict[str, list[str]]:
         " ".join(r["abstract"].split()) for r in rows
         if re.match(r"^(07|08|09|10|11|12|13|14)\d{2}\.", r["id"]) and len(r["abstract"].split()) >= 120
     ][:n]
+
+    # 2026 benchmark: current models (Claude Opus 5, GPT-4.1, gpt-oss-120b, Claude Haiku 4.5,
+    # Qwen 3.8) plus human text that detectors find hard (non-native academic English, Wikipedia)
+    bench = "textsightai/ai-text-detection-benchmark-2026"
+    sets["ai_2026_models"] = [r["text"] for r in _rows(bench, 0, 100, "ai_generated_2026") if len(r["text"].split()) >= 100]
+    for cfg, name in (("human_pmc_ccby_nonanglophone", "human_nonnative_academic"), ("human_wikipedia_pre2022", "human_wikipedia_pre2022")):
+        rows = _rows(bench, 0, 100, cfg) + _rows(bench, 100, 100, cfg)
+        rnd.shuffle(rows)
+        sets[name] = [r["text"] for r in rows if len(r["text"].split()) >= 120][:n]
 
     url = "https://huggingface.co/datasets/Hello-SimpleAI/HC3/resolve/main/{}.jsonl"
     hc3 = []

@@ -26,7 +26,7 @@
 .open:hover { filter: brightness(1.08); }
 .open span { display: inline-block; transition: transform .15s; }
 .open:hover span { transform: translateX(3px); }
-@media (prefers-color-scheme: dark) { .open { color: #10141b; } }
+.open { color: var(--on-fill); }
 
 .flow { margin: 34px auto 10px; max-width: 900px; text-align: center; }
 .flow h3 { color: var(--muted); font-size: 14px; font-weight: 600; margin: 0 0 12px; }
@@ -52,7 +52,13 @@
 .saved-actions { display: flex; gap: 8px; align-items: center; }
 .saved-actions .continue { background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; font-size: 14px; padding: 7px 14px; border-radius: 8px; }
 .saved-actions .continue:hover { filter: brightness(1.08); }
-@media (prefers-color-scheme: dark) { .saved-actions .continue { color: #10141b; } }
+.saved-actions .continue { color: var(--on-fill); }
 .saved-actions .delete { color: var(--muted); font-size: 14px; }
 .saved-actions .delete:hover { color: #d92d20; border-color: #d92d20; }
 @media (max-width: 600px) { .saved-actions { width: 100%; } .saved-actions .continue { flex: 1; text-align: center; } }
+.saved-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.saved-tools input[type="search"] { flex: 1; min-width: 180px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: var(--card); }
+.saved-tools select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); margin-left: 4px; }
+.saved-actions .rename { color: var(--muted); font-size: 14px; }
+.rename-input { width: 100%; font: inherit; font-weight: 600; border: 1px solid var(--accent); border-radius: 6px; padding: 3px 8px; background: var(--bg); }
+.saved-empty { padding: 10px 4px; }

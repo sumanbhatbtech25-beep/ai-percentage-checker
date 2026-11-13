@@ -1,18 +1,37 @@
-"""Saved reports: stored as JSON files on this computer until the user deletes them.
+"""Saved reports, kept on this computer until the user deletes them.
 
-Location: <project>/data/reports/<id>.json  (git-ignored; never uploaded anywhere)
+Security:
+  * Stored OUTSIDE the project folder, in the user's local app-data folder
+    (%LOCALAPPDATA%\\ReportProgram\\reports on Windows). The project lives in
+    OneDrive, which would otherwise sync every saved report to the cloud.
+  * Encrypted at rest with Windows DPAPI (see vault.py): only this Windows
+    account on this computer can read them.
+  * Report ids are random and strictly validated (no path tricks).
+  * Writes are atomic, and deleted reports are removed from disk.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import secrets
+import sys
 import time
-import uuid
 from pathlib import Path
 
-DIR = Path(os.environ.get("AIC_REPORTS_DIR", Path(__file__).resolve().parent.parent / "data" / "reports"))
+from . import vault
+
+
+def _default_dir() -> Path:
+    if sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "ReportProgram" / "reports"
+    return Path.home() / ".local" / "share" / "report-program" / "reports"
+
+
+DIR = Path(os.environ.get("AIC_REPORTS_DIR") or _default_dir())
+LEGACY_DIR = Path(__file__).resolve().parent.parent / "data" / "reports"  # old location (inside OneDrive)
 _ID_RE = re.compile(r"^[a-f0-9]{12}$")
+MODES = {"standard", "strict", "very_hard"}
 MAX_TEXT = 400_000
 
 
@@ -20,6 +39,48 @@ def _path(report_id: str) -> Path:
     if not _ID_RE.match(report_id or ""):
         raise ValueError("Invalid report id")
     return DIR / f"{report_id}.json"
+
+
+def _ensure_dir() -> None:
+    DIR.mkdir(parents=True, exist_ok=True)
+    if sys.platform != "win32":
+        os.chmod(DIR, 0o700)
+
+
+def _write(d: dict) -> None:
+    _ensure_dir()
+    p = _path(d["id"])
+    tmp = p.with_suffix(".tmp")
+    tmp.write_bytes(vault.protect(json.dumps(d, ensure_ascii=False).encode("utf-8")))
+    if sys.platform != "win32":
+        os.chmod(tmp, 0o600)
+    tmp.replace(p)  # atomic: a crash never leaves a half-written report
+
+
+def _read(p: Path) -> dict:
+    return json.loads(vault.unprotect(p.read_bytes()).decode("utf-8"))
+
+
+def migrate_legacy() -> int:
+    """Move reports saved by older versions out of the OneDrive project folder, encrypting them."""
+    if not LEGACY_DIR.exists():
+        return 0
+    moved = 0
+    for f in LEGACY_DIR.glob("*.json"):
+        try:
+            d = _read(f)
+            if _ID_RE.match(str(d.get("id", ""))):
+                _write(d)
+                f.unlink()
+                moved += 1
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    for d in (LEGACY_DIR, LEGACY_DIR.parent):  # rmdir only ever removes EMPTY folders
+        try:
+            d.rmdir()
+        except OSError:
+            break
+    return moved
 
 
 def _derive_title(text: str) -> str:
@@ -37,8 +98,8 @@ def list_reports() -> list[dict]:
     out = []
     for f in DIR.glob("*.json"):
         try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            d = _read(f)
+        except (OSError, ValueError, json.JSONDecodeError):
             continue
         out.append({k: d.get(k) for k in ("id", "title", "created", "updated", "ai_percent", "words", "mode")})
     out.sort(key=lambda d: d.get("updated") or 0, reverse=True)
@@ -49,12 +110,11 @@ def get_report(report_id: str) -> dict:
     p = _path(report_id)
     if not p.exists():
         raise FileNotFoundError(report_id)
-    return json.loads(p.read_text(encoding="utf-8"))
+    return _read(p)
 
 
 def save_report(text: str, mode: str = "standard", report_id: str | None = None,
                 title: str | None = None, ai_percent: int | None = None) -> dict:
-    DIR.mkdir(parents=True, exist_ok=True)
     now = time.time()
     existing = {}
     if report_id:
@@ -63,7 +123,7 @@ def save_report(text: str, mode: str = "standard", report_id: str | None = None,
         except FileNotFoundError:
             existing = {}
     else:
-        report_id = uuid.uuid4().hex[:12]
+        report_id = secrets.token_hex(6)
     text = text[:MAX_TEXT]
     d = {
         "id": report_id,
@@ -71,15 +131,19 @@ def save_report(text: str, mode: str = "standard", report_id: str | None = None,
         "created": existing.get("created", now),
         "updated": now,
         "text": text,
-        "mode": mode,
-        "ai_percent": ai_percent if ai_percent is not None else existing.get("ai_percent"),
+        "mode": mode if mode in MODES else "standard",
+        "ai_percent": ai_percent if isinstance(ai_percent, int) and 0 <= ai_percent <= 100 else existing.get("ai_percent"),
         "words": len(text.split()),
     }
-    p = _path(report_id)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(p)  # atomic: a crash never leaves a half-written report
+    _write(d)
     return {k: d[k] for k in ("id", "title", "updated", "ai_percent", "words")}
+
+
+def rename_report(report_id: str, title: str) -> dict:
+    d = get_report(report_id)
+    d["title"] = (title.strip() or d["title"])[:120]
+    _write(d)
+    return {"id": d["id"], "title": d["title"]}
 
 
 def delete_report(report_id: str) -> None:

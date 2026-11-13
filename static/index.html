@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/icon.png">
+  <script src="/static/boot.js?v=1"></script>
   <title>AI Checker · Report Program</title>
-  <link rel="stylesheet" href="/static/style.css?v=13">
-  <script>document.documentElement.dataset.page = location.pathname.startsWith("/editor") ? "editor" : "checker";</script>
+  <link rel="stylesheet" href="/static/style.css?v=18">
 </head>
 <body>
 <header class="topbar">
@@ -63,6 +64,7 @@
         <div class="bar"><i id="barBino"></i></div>
         <div class="sig"><span>Style (AI vocabulary, rhythm)</span><b id="sigStyle"></b></div>
         <div class="bar"><i id="barStyle"></i></div>
+        <p class="muted tiny accuracy-note">Tested on 2026 AI models: GPT-4.1 and Claude Haiku are caught reliably, but the newest models (such as Claude Opus 5) often aren't, by this or any open detector. A low score is not proof that text is human-written.</p>
       </div>
     </div>
     <div id="warnings"></div>
@@ -81,6 +83,7 @@
           </div>
           <div class="tools">
             <button id="toEditor" class="primary checker-only">Fix it in the Editor →</button>
+            <span class="undo-redo editor-only"><button id="undoBtn" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button><button id="redoBtn" class="icon-btn" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↷</button></span>
             <button id="fixAll" class="fix-all editor-only" title="Swap every highlighted word for its top suggestion">Fix all</button>
             <button id="editToggle" class="editor-only">Edit text</button>
             <span class="save-wrap"><button id="saveReport" class="save-btn">Save report</button><span id="saveStatus" class="muted tiny"></span></span>
@@ -107,6 +110,13 @@
           <ol id="paraList" class="sugg-list para-list"></ol>
         </div>
 
+        <div class="card sim-card">
+          <h3>Similarity to published papers</h3>
+          <p class="muted tiny">Finds sentences that are copied or closely paraphrased from research papers on your topic, and whether you cited them.</p>
+          <button id="simRun">Run similarity check</button>
+          <div id="simOut"></div>
+        </div>
+
         <div class="card checker-only">
           <h3>Want to lower it?</h3>
           <p class="muted tiny">The Editor highlights every flagged word so you can swap it with a tap, and gives tips and rewrite starting points for each paragraph.</p>
@@ -131,8 +141,8 @@
 <div id="pop" class="pop" hidden></div>
 <div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyMsg">Analyzing…</div></div>
 
-<script src="/static/nav.js?v=1"></script>
+<script src="/static/nav.js?v=3"></script>
 <script src="/static/confetti.js?v=1"></script>
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>
