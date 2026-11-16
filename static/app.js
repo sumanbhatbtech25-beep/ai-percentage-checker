@@ -790,7 +790,7 @@ $("newDoc").addEventListener("click", () => {
 const currentText = () => (state.editing ? $("editor").value : state.text);
 function renderDownload() {
   const o = state.original;
-  $("dlOriginal").hidden = !(o && o.kind === "docx");
+  $("dlOriginalRow").hidden = !(o && o.kind === "docx");
   $("dlNote").textContent = o?.kind === "docx"
     ? `Writes your changes into “${o.name}”. Fonts, headings, tables, images and layout stay exactly as they were.`
     : o?.kind === "pdf"
@@ -798,29 +798,46 @@ function renderDownload() {
       : "Tip: upload your report as a .docx to download it with its original formatting.";
 }
 
-$("dlOriginal").addEventListener("click", async () => {
-  const o = state.original, btn = $("dlOriginal");
-  btn.disabled = true;
+const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+// Download the user's own .docx with the edited wording; `compress` also makes the file smaller.
+async function exportOriginal(compress) {
+  const o = state.original, btn = compress ? $("dlCompress") : $("dlOriginal");
+  $("dlOriginal").disabled = $("dlCompress").disabled = true;
   const label = btn.textContent;
-  btn.textContent = "Preparing your file…";
+  btn.textContent = compress ? "Compressing…" : "Preparing your file…";
   try {
     const useReport = !o.b64 || (state.reportId && state.originalSaved);
     const r = await fetch("/api/export-original", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: currentText(), filename: o.name, ...(useReport ? { report_id: state.reportId } : { original_b64: o.b64 }) }),
+      body: JSON.stringify({ text: currentText(), filename: o.name, compress, ...(useReport ? { report_id: state.reportId } : { original_b64: o.b64 }) }),
     });
     if (!r.ok) throw new Error((await readJson(r)).detail || "Download failed");
     const changes = +r.headers.get("X-Changes"), merged = +r.headers.get("X-Structure-Changes");
-    download(await r.blob(), o.name.replace(/\.docx$/i, "") + " (revised).docx");
-    $("dlNote").textContent = `Downloaded: ${changes} wording change${changes === 1 ? "" : "s"} written into your original file, formatting kept.` +
-      (merged ? ` Note: ${merged} paragraph join${merged === 1 ? " was" : "s were"} kept as separate paragraphs to protect the layout.` : "");
+    const stem = o.name.replace(/\.docx$/i, "");
+    download(await r.blob(), `${stem} (revised${compress ? ", compressed" : ""}).docx`);
+    let msg = `Downloaded: ${changes} wording change${changes === 1 ? "" : "s"} written into your original file, formatting kept.`;
+    if (compress) {
+      const before = +r.headers.get("X-Size-Before"), after = +r.headers.get("X-Size-After");
+      const fonts = r.headers.get("X-Fonts-Removed"), kept = r.headers.get("X-Fonts-Kept"), imgs = +r.headers.get("X-Images-Shrunk");
+      const how = [fonts && `removed embedded copies of standard fonts (${fonts}), which every computer with Office already has`,
+                   imgs && `shrank ${imgs} oversized image${imgs === 1 ? "" : "s"}`].filter(Boolean).join(" and ");
+      msg += after < before
+        ? ` Compressed ${kb(before)} → ${kb(after)} (${Math.round(100 - (100 * after) / before)}% smaller): ${how || "packed more tightly"}. It looks exactly the same.`
+        : " This file was already as small as it can safely get.";
+      if (kept) msg += ` Kept the unusual font${kept.includes(",") ? "s" : ""} ${kept} embedded so the look doesn't change.`;
+    }
+    if (merged) msg += ` Note: ${merged} paragraph join${merged === 1 ? " was" : "s were"} kept as separate paragraphs to protect the layout.`;
+    $("dlNote").textContent = msg;
   } catch (e) {
     $("dlNote").textContent = e.message;
   } finally {
-    btn.disabled = false;
+    $("dlOriginal").disabled = $("dlCompress").disabled = false;
     btn.textContent = label;
   }
-});
+}
+$("dlOriginal").addEventListener("click", () => exportOriginal(false));
+$("dlCompress").addEventListener("click", () => exportOriginal(true));
 
 $("dlTxt").addEventListener("click", () => download(new Blob([currentText()], { type: "text/plain" }), "revised.txt"));
 $("dlDocx").addEventListener("click", async () => {

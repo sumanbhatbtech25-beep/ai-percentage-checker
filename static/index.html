@@ -6,7 +6,7 @@
   <link rel="icon" href="/static/icon.png">
   <script src="/static/boot.js?v=2"></script>
   <title>AI Checker · Report Program</title>
-  <link rel="stylesheet" href="/static/style.css?v=19">
+  <link rel="stylesheet" href="/static/style.css?v=20">
 </head>
 <body>
 <header class="topbar">
@@ -131,7 +131,10 @@
 
         <div class="card editor-only">
           <h3>Download your report</h3>
-          <button id="dlOriginal" class="primary dl-original" hidden>Download .docx (keeps your formatting)</button>
+          <div id="dlOriginalRow" class="dl-original-row" hidden>
+            <button id="dlOriginal" class="primary">Download .docx (keeps your formatting)</button>
+            <button id="dlCompress" class="dl-compress" title="Same document, smaller file: removes embedded copies of standard fonts and shrinks oversized images">Compress</button>
+          </div>
           <p id="dlNote" class="muted tiny dl-note"></p>
           <div class="row"><button id="dlDocx" title="Plain Word file: text only, no original formatting">Plain .docx</button><button id="dlTxt">.txt</button><button id="copy">Copy</button></div>
         </div>
@@ -145,6 +148,6 @@
 
 <script src="/static/nav.js?v=3"></script>
 <script src="/static/confetti.js?v=1"></script>
-<script src="/static/app.js?v=18"></script>
+<script src="/static/app.js?v=19"></script>
 </body>
 </html>

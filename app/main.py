@@ -245,6 +245,7 @@ class ExportOriginalIn(BaseModel):
     report_id: str | None = None      # use the original stored with a saved report...
     original_b64: str | None = None   # ...or the one the page still holds
     filename: str | None = None
+    compress: bool = False            # also make the file smaller (embedded standard fonts, big images)
 
 
 @app.post("/api/export-original")
@@ -264,13 +265,24 @@ def export_original(body: ExportOriginalIn):
     if data is None:
         raise HTTPException(404, "The original Word file isn't available. Upload the .docx again to download with its formatting.")
     out, stats = apply_edits_to_docx(data, body.text[: config.MAX_CHARS])
+    size_before = len(out)
+    shrink = {"fonts_removed": [], "fonts_kept": [], "images_shrunk": 0}
+    if body.compress:
+        from .compress import compress_docx
+
+        out, shrink = compress_docx(out)
     stem = _re.sub(r"\.docx$", "", body.filename or "report", flags=_re.I)
-    name = f"{stem} (revised).docx"
+    name = f"{stem} (revised{', compressed' if body.compress else ''}).docx"
     return Response(out, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={
         "Content-Disposition": f"attachment; filename=\"revised.docx\"; filename*=UTF-8''{quote(name)}",
         "X-Changes": str(stats["changes"]),
         "X-Paragraphs-Changed": str(stats["paragraphs_changed"]),
         "X-Structure-Changes": str(stats["structure_changes"]),
+        "X-Size-Before": str(size_before),
+        "X-Size-After": str(len(out)),
+        "X-Fonts-Removed": ", ".join(shrink["fonts_removed"]),
+        "X-Fonts-Kept": ", ".join(shrink["fonts_kept"]),
+        "X-Images-Shrunk": str(shrink["images_shrunk"]),
     })
 
 

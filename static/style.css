@@ -220,3 +220,6 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .sim-item.similar { opacity: .85; }
 .dl-original { width: 100%; margin-bottom: 6px; }
 .dl-note { margin: 0 0 8px; }
+.dl-original-row { display: flex; gap: 8px; margin-bottom: 6px; }
+.dl-original-row #dlOriginal { flex: 1; }
+.dl-compress { white-space: nowrap; border-color: var(--accent); color: var(--accent); font-weight: 600; }
