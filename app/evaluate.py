@@ -106,7 +106,8 @@ def load_sets(n: int = 60) -> dict[str, list[str]]:
 def collect(n: int = 60) -> None:
     from .detector import collect_raw
 
-    sets = load_sets(n)
+    texts = Path(__file__).resolve().parent.parent / "eval_texts.json"  # same texts as compare_detectors
+    sets = json.loads(texts.read_text(encoding="utf-8")) if texts.exists() else load_sets(n)
     cache = {}
     for name, texts in sets.items():
         print(f"{name}: {len(texts)} texts", flush=True)
@@ -117,10 +118,7 @@ def collect(n: int = 60) -> None:
                 "words": [s.words for s in raw.sents],
                 "q": raw.q,
                 "windows": raw.windows,
-                "pcs": raw.pcs,
-                "bino": raw.bino,
-                "styles": raw.styles,
-                "sent_pc": {str(k): v for k, v in raw.sent_pc.items()},
+                "z": [d["z"] for d in raw.det],
             })
         cache[name] = items
     CACHE.write_text(json.dumps(cache))
@@ -130,19 +128,16 @@ def collect(n: int = 60) -> None:
 # ----------------------------------------------------------------------------- offline scoring
 def doc_percent(item: dict, mode: str) -> int:
     """Same scoring as detector.score_raw/analyze, run on cached raw signals."""
-    from .detector import MODES, bino_prob, calibrated_cls, fuse
+    from .detector import MODES, window_prob
 
     thr = MODES[mode]["threshold"]
-    win = [fuse(pc, bino_prob(b), ps, mode) for pc, b, ps in zip(item["pcs"], item["bino"], item["styles"])]
+    win = [window_prob(z, mode) for z in item["z"]]
     flagged = total = 0
     for qi, si in enumerate(item["q"]):
         cov = [win[w] for w, (a, b) in enumerate(item["windows"]) if a <= qi < b]
         if not cov:
             continue
         sc = sum(cov) / len(cov)
-        loc = item["sent_pc"].get(str(si))
-        if loc is not None:
-            sc = 0.75 * sc + 0.25 * calibrated_cls(loc, mode)
         w = item["words"][si]
         total += w
         flagged += w if sc >= thr else 0

@@ -149,7 +149,12 @@ function renderScore() {
       : "of text likely AI-generated";
   $("warnings").innerHTML = (r.warnings || []).map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("");
   const s = r.signals || {};
-  setSig("Cls", s.classifier); setSig("Bino", s.binoculars); setSig("Style", s.style);
+  setSig("Cls", s.tropa); setSig("Bino", s.vanguard); setSig("Style", s.style);
+  // tropa-mini also recognises AI text passed through "humanizer" / paraphrasing tools
+  const hz = s.humanized || 0;
+  // only when "humanized" clearly outweighs plain AI output (plain AI text splits roughly 50/50)
+  $("humanizedNote").hidden = !(r.ai_percent >= 20 && hz > (s.ai_raw || 0) + 0.2);
+  $("humanizedNote").textContent = `Signs of AI text run through a "humanizer" or paraphrasing tool (${Math.round(hz * 100)}% of the AI signal). Modern checkers like Turnitin look for this too, so swapping words won't hide it.`;
   const paras = r.paragraphs || [];
   const count = (lv) => paras.filter((p) => p.ai_percent !== null && level(p.ai_percent) === lv).length;
   $("paraCounts").innerHTML = paras.length
@@ -281,11 +286,11 @@ function renderPanel(i) {
   if (st.error) html += `<div class="warn">${esc(st.error)}</div>`;
   if (st.data) {
     const o = st.data.original;
-    html += `<div class="muted tiny cand-orig">This paragraph on its own: <b>${o.ai_percent}% AI</b> · classifier ${pctOf(o.signals.classifier)} · Binoculars ${pctOf(o.signals.binoculars)} · style ${pctOf(o.signals.style)}</div>`;
+    html += `<div class="muted tiny cand-orig">This paragraph on its own: <b>${o.ai_percent}% AI</b> · tropa ${pctOf(o.signals.tropa)} · Vanguard ${pctOf(o.signals.vanguard)}</div>`;
     if (!st.data.candidates.length) html += `<div class="warn">No usable versions came back. Try again.</div>`;
     st.data.candidates.forEach((c, k) => {
       html += `<div class="cand"><div class="cand-top"><span class="badge ${level(c.ai_percent)}">${c.ai_percent}% AI</span>` +
-        `<span class="muted tiny">classifier ${pctOf(c.signals.classifier)} · Binoculars ${pctOf(c.signals.binoculars)} · style ${pctOf(c.signals.style)}</span>` +
+        `<span class="muted tiny">tropa ${pctOf(c.signals.tropa)} · Vanguard ${pctOf(c.signals.vanguard)}</span>` +
         `<button class="small use-btn" data-p="${i}" data-c="${k}">Use this</button></div>` +
         `<p>${esc(c.text)}</p>${c.note ? `<div class="note">${esc(c.note)}</div>` : ""}</div>`;
     });

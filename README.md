@@ -73,18 +73,19 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-## Calibrate
+## Measure accuracy
 ```bash
-.venv\Scripts\python -m app.calibrate --n 60
+.venv\Scripts\python -m app.compare_detectors     # head-to-head test of candidate detectors
+.venv\Scripts\python -m app.evaluate collect      # run the app's own pipeline on the test sets (GPU)
+.venv\Scripts\python -m app.evaluate report       # AI % per mode for each human / AI set
 ```
-This scores human and ChatGPT answers from the HC3 dataset, then prints a Binoculars threshold and the AI % each mode gives for human text and for AI text. Put the threshold in `app/config.py` (or the `AIC_BINO_THRESHOLD` environment variable).
+The test sets are 360 human texts (student essays, academic essays, arXiv abstracts, non-native academic English, pre-2022 Wikipedia) and AI text from 2022–2026 models (ChatGPT, AI essays, Claude Opus 5, GPT-4.1, gpt-oss-120b, Claude Haiku 4.5, Qwen 3.8). Stop the server first so the GPU is free.
 
-## Low VRAM (<8 GB)
+## Lower GPU memory
+The detectors and writer model use about 5 GB of GPU memory. On a smaller GPU, use a smaller writer model:
 ```bash
-set AIC_OBSERVER=Qwen/Qwen2.5-0.5B
-set AIC_PERFORMER=Qwen/Qwen2.5-0.5B-Instruct
+set AIC_WRITER=Qwen/Qwen2.5-0.5B-Instruct
 ```
-Re-run calibration after changing models.
 
 ## Paper search limits
 Without a key, OpenAlex gives each network a small free daily budget (about 30 searches), and Semantic Scholar's shared pool is often rate-limited. For more:
@@ -97,7 +98,7 @@ set S2_API_KEY=your_key              &:: optional, from semanticscholar.org/prod
 | File | Purpose |
 |---|---|
 | `app/detector.py` | sentence splitting, overlapping windows, signal fusion, AI %, suggestions |
-| `app/models.py` | DeBERTa classifier, Binoculars, RoBERTa masked-LM |
+| `app/models.py` | detectors (tropa-mini + Vanguard), Qwen writer model, RoBERTa masked-LM |
 | `app/lexicon.py` | about 200 LLM-overused words and phrases with alternatives |
 | `app/rewrite.py` | paragraph rewrites (Qwen2.5-1.5B-Instruct), each re-scored |
 | `app/papers.py` | keyword extraction, OpenAlex + Semantic Scholar search (cached), embedding re-rank |
@@ -105,7 +106,7 @@ set S2_API_KEY=your_key              &:: optional, from semanticscholar.org/prod
 | `app/similarity.py` | copied / paraphrased sentence check against paper abstracts |
 | `app/reports.py`, `app/vault.py` | saved reports, encrypted with DPAPI, stored outside OneDrive |
 | `app/security.py`, `app/access.py` | host/origin checks, security headers, phone-mode password |
-| `app/evaluate.py`, `app/tune.py` | accuracy measurement and tuning (2022–2026 AI vs human writing) |
+| `app/compare_detectors.py`, `app/evaluate.py` | detector comparison and accuracy measurement (2022–2026 AI vs human writing) |
 | `app/main.py` | FastAPI server |
 | `static/` | web UI (`home.html`, `index.html` checker/editor, `papers.html`) |
 | `run.bat`, `run_phone.bat`, `tools/` | launchers, Desktop shortcut, icon |

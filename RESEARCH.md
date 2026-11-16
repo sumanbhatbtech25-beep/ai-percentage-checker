@@ -94,7 +94,38 @@ Added the `textsightai/ai-text-detection-benchmark-2026` sets: 56 texts from **C
 
 Opus 5 and Qwen 3.8 are close to invisible to every open detector used here. Binoculars rates them *more* human than human writing (1.065 vs 1.038), and the classifier's scores overlap heavily with real students' scores. Re-tuning on all sets confirmed that catching them costs too much: reaching 75% detection would flag up to 30% of human writers. **The settings were kept.** The fix is a classifier trained on modern AI text, which needs far more than 56 samples. The checker now tells users that a low score doesn't prove human writing.
 
-## 8. Honest limitations
+## 8. Detector upgrade (Nov 2026)
+
+**Trigger:** a polished technical paper scored 0–3% here while ZeroGPT said 93% and Grammarly 33%. It read like current-model AI output, the exact gap section 7 found: the old detectors (desklib + Binoculars) missed Claude Opus 5 and Qwen 3.8 entirely.
+
+**What the checkers do now (2026 research):**
+* **Turnitin** added AI-bypasser / humanizer detection (English, Aug 2025) and reportedly moved to a single retrained model in 2026. It keeps a <1% document false-positive target and shows 1–19% as `*%`.
+* **GPTZero** documents a multi-task classifier with paraphrase and humanizer defences (Feb 2026 paper; model 4o is the default from Sept 2026).
+* **ZeroGPT** has consistently high independent false-positive rates (roughly 15–26% in studies), so its numbers alone aren't proof. **Grammarly**'s detector has little independent data.
+* **Open detectors:** MELD tops RAID's open-source board but is gated (needs approved access).
+
+**Head-to-head test** (`app/compare_detectors.py`). Each detector was held to at most 3% of human documents flagged:
+
+| Detector | 2026 models | ChatGPT | Older AI essays |
+|---|---|---|---|
+| desklib (old) | 55% | 87% | 85% |
+| **tropa-mini** (Aug 2026, humanizer-aware) | 96% | 100% | 52% |
+| **Vanguard** (PAN-CLEF 2026, 2nd place) | 89% | 93% | 93% |
+| tmr / rasbt-modernbert | 0–32% | 0% | 0% |
+
+**Chosen:** the average of tropa-mini and Vanguard. Held-out: 0% human flagged, 100% 2026 models, 100% ChatGPT, 90% older AI essays. Through the app's full pipeline (`app/evaluate.py`):
+
+| Mode | Human flagged (6 sets) | 2026 AI | ChatGPT | Older AI essays |
+|---|---|---|---|---|
+| **Balanced** | **0%** | **95%** | 97% | 85% |
+| Strict | 0–3% | 98% | 100% | 90% |
+| Very hard | 0–10% | 98% | 100% | 98% |
+
+Binoculars and the old classifier were removed. That frees about 4 GB of GPU memory and makes analysis faster (about 5 s instead of 11 s for 2,000 words). The style signal is now a hint only. tropa-mini's **humanized** class drives a warning when it clearly outweighs plain AI output.
+
+**Word swaps:** swapping words lowers the score only a little (users saw about 3%). That's expected: modern detectors judge structure and rhythm, and look specifically for word-swapped "humanized" text. The app now says so.
+
+## 9. Honest limitations
 
 * No detector is proof. Turnitin itself says its score shouldn't be the only basis for academic action.
 * False positives hit non-native English writers and very formulaic writing harder.

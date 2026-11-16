@@ -6,27 +6,19 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-# --- Models -----------------------------------------------------------------
-# Supervised classifier: DeBERTa-v3-large fine-tuned for AI-text detection
-# (one of the strongest open detectors on the RAID benchmark).
-CLASSIFIER_MODEL = _env("AIC_CLASSIFIER", "desklib/ai-text-detector-v1.01")
+# --- Detectors ----------------------------------------------------------------
+# Chosen by app/compare_detectors.py (Nov 2026): on held-out tests the average of
+# these two caught 100% of 2026-model AI text (Claude Opus 5, GPT-4.1, gpt-oss,
+# Claude Haiku 4.5, Qwen 3.8) and 100% of ChatGPT text while flagging 0% of
+# human writing. The previous detectors (desklib + Binoculars) caught 55-61%.
+TROPA_MODEL = _env("AIC_TROPA", "wasitaigeneratedcom/tropa-mini-ai-text-detector")  # Apache-2.0
+VANGUARD_MODEL = _env("AIC_VANGUARD", "ShantanuT01/vanguard-ai-text-detector")      # MIT
 
-# Zero-shot "Binoculars" detector (Hans et al., ICML 2024). It needs a base
-# model (observer) and its instruction-tuned sibling (performer) that share a
-# tokenizer. The paper used Falcon-7B; we default to Qwen2.5-1.5B so it fits an
-# 8 GB laptop GPU. Use Qwen/Qwen2.5-0.5B(-Instruct) if you run out of VRAM.
-OBSERVER_MODEL = _env("AIC_OBSERVER", "Qwen/Qwen2.5-1.5B")
-PERFORMER_MODEL = _env("AIC_PERFORMER", "Qwen/Qwen2.5-1.5B-Instruct")
+# Instruction-tuned writer: word predictability, paragraph rewrites, paper comparisons.
+WRITER_MODEL = _env("AIC_WRITER", "Qwen/Qwen2.5-1.5B-Instruct")
 
 # Masked LM used to propose context-aware replacement words.
 MLM_MODEL = _env("AIC_MLM", "roberta-base")
-
-# --- Binoculars calibration ---------------------------------------------------
-# Binoculars score = log-perplexity / cross-perplexity. LOWER = more AI-like.
-# These defaults were produced by `python -m app.calibrate` for the Qwen pair;
-# re-run calibration if you change the observer/performer models.
-BINO_THRESHOLD = float(_env("AIC_BINO_THRESHOLD", "0.92"))
-BINO_SCALE = float(_env("AIC_BINO_SCALE", "0.045"))
 
 # --- Segmentation (mirrors Turnitin's published approach) --------------------
 # Text is cut into overlapping windows of a few hundred words; every sentence

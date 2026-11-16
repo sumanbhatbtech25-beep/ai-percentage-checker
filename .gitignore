@@ -4,3 +4,6 @@ __pycache__/
 eval_cache.json
 # legacy location of saved reports (they now live in %LOCALAPPDATA%/ReportProgram)
 data/
+eval_texts.json
+detector_comparison.json
+detector_windows.json

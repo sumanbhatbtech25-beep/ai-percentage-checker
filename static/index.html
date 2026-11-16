@@ -6,7 +6,7 @@
   <link rel="icon" href="/static/icon.png">
   <script src="/static/boot.js?v=2"></script>
   <title>AI Checker · Report Program</title>
-  <link rel="stylesheet" href="/static/style.css?v=20">
+  <link rel="stylesheet" href="/static/style.css?v=22">
 </head>
 <body>
 <header class="topbar">
@@ -58,13 +58,14 @@
       </div>
       <div class="breakdown">
         <h3>Detector breakdown</h3>
-        <div class="sig"><span>Deep classifier (DeBERTa)</span><b id="sigCls"></b></div>
+        <div class="sig"><span>tropa-mini (2026 detector)</span><b id="sigCls"></b></div>
         <div class="bar"><i id="barCls"></i></div>
-        <div class="sig"><span>Binoculars (zero-shot LLM)</span><b id="sigBino"></b></div>
+        <div class="sig"><span>Vanguard (PAN-CLEF 2026)</span><b id="sigBino"></b></div>
         <div class="bar"><i id="barBino"></i></div>
-        <div class="sig"><span>Style (AI vocabulary, rhythm)</span><b id="sigStyle"></b></div>
+        <div class="sig"><span>Style hints (not part of the score)</span><b id="sigStyle"></b></div>
         <div class="bar"><i id="barStyle"></i></div>
-        <p class="muted tiny accuracy-note">Tested on 2026 AI models: GPT-4.1 and Claude Haiku are caught reliably, but the newest models (such as Claude Opus 5) often aren't, by this or any open detector. A low score is not proof that text is human-written.</p>
+        <p id="humanizedNote" class="warn humanized-note" hidden></p>
+        <p class="muted tiny accuracy-note">Two 2026 detectors, averaged. In tests they caught 95–100% of text from current AI models (incl. Claude Opus 5 and GPT-4.1) while flagging 0% of human writing in Balanced mode. No detector is proof: use the score as a guide, not a verdict.</p>
       </div>
     </div>
     <div id="warnings"></div>
@@ -126,6 +127,7 @@
         <div class="card">
           <h3>Word suggestions <span id="suggCount" class="pill"></span></h3>
           <p class="muted tiny">Tap any highlighted word in the document to pick a replacement, then press <b>Re-check score</b>.</p>
+          <p class="muted tiny word-honesty"><b>Why the score barely moves after swapping words:</b> modern detectors, including the ones here and Turnitin, judge sentence structure, rhythm and how ideas are laid out, not single words, and they specifically look for word-swapped "humanized" text. Swaps make your writing plainer, but what lowers a score is rewriting a paragraph in your own words, with your own examples and reasoning.</p>
           <ol id="suggList" class="sugg-list"></ol>
         </div>
 
@@ -148,6 +150,6 @@
 
 <script src="/static/nav.js?v=3"></script>
 <script src="/static/confetti.js?v=1"></script>
-<script src="/static/app.js?v=19"></script>
+<script src="/static/app.js?v=21"></script>
 </body>
 </html>

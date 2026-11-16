@@ -1,14 +1,21 @@
-"""Model loading and the three raw scoring primitives.
+"""Model loading and the raw scoring primitives.
 
-1. classifier_probs  - supervised DeBERTa-v3-large detector (desklib)
-2. binoculars        - zero-shot Binoculars score + per-token probabilities
-3. mlm_candidates    - masked-LM replacement candidates for a word in context
+Detectors (chosen in Nov 2026 by app/compare_detectors.py on human writing vs
+2022-2026 AI text, including Claude Opus 5, GPT-4.1, gpt-oss and Qwen 3.8):
+  * tropa-mini - DeBERTa-v3-large, 4 classes: human / ai / ai_edited / humanized
+  * Vanguard   - ModernBERT-large, 2nd place at PAN-CLEF 2026 AI-text detection
+Their scores are averaged (in logit space); see detector.py.
+
+Helpers:
+  * writer (Qwen2.5-1.5B-Instruct) - per-token predictability for word
+    suggestions, paragraph rewrites, paper comparisons
+  * masked LM (RoBERTa)            - context-aware replacement words
 """
 from __future__ import annotations
 
-import glob
-import os
+import math
 import threading
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -19,6 +26,7 @@ from transformers import (
     AutoModel,
     AutoModelForCausalLM,
     AutoModelForMaskedLM,
+    AutoModelForSequenceClassification,
     AutoTokenizer,
 )
 
@@ -29,36 +37,36 @@ DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 # The paper-matching embedder runs on the CPU (it's not on the analysis path),
 # which keeps the 8 GB GPU free for the detectors and avoids out-of-memory errors.
 HELPER_DEVICE = "cpu"
+MODEL_FILES = ["*.json", "*.safetensors", "*.txt", "spm.model", "vocab.json", "merges.txt"]
 
 
-class DesklibDetector(nn.Module):
-    """DeBERTa encoder + mean pooling + single-logit head (matches the model card)."""
+def _logit(p: float) -> float:
+    p = min(max(p, 1e-6), 1 - 1e-6)
+    return math.log(p / (1 - p))
 
-    def __init__(self, model_id: str):
+
+class MeanPoolDetector(nn.Module):
+    """desklib-style detector: DeBERTa encoder + mean pooling + linear head."""
+
+    def __init__(self, path: str, n_out: int):
         super().__init__()
-        path = snapshot_download(model_id)
+        from safetensors.torch import load_file
+
         cfg = AutoConfig.from_pretrained(path)
         self.model = AutoModel.from_config(cfg)
-        self.classifier = nn.Linear(cfg.hidden_size, 1)
-        files = glob.glob(os.path.join(path, "*.safetensors"))
-        if files:
-            from safetensors.torch import load_file
-
-            state = {}
-            for f in files:
-                state.update(load_file(f))
-        else:
-            state = torch.load(os.path.join(path, "pytorch_model.bin"), map_location="cpu")
-        missing, unexpected = self.load_state_dict(state, strict=False)
+        self.classifier = nn.Linear(cfg.hidden_size, n_out)
+        state = {}
+        for f in Path(path).glob("*.safetensors"):
+            state.update(load_file(str(f)))
+        missing, _ = self.load_state_dict(state, strict=False)
         real_missing = [k for k in missing if "position_ids" not in k]
         if real_missing:
-            raise RuntimeError(f"Classifier weights missing: {real_missing[:5]}")
+            raise RuntimeError(f"Detector weights missing: {real_missing[:5]}")
 
     def forward(self, input_ids, attention_mask):
         hidden = self.model(input_ids=input_ids, attention_mask=attention_mask)[0]
         mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
-        pooled = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
-        return self.classifier(pooled).squeeze(-1)
+        return self.classifier((hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9))
 
 
 class Models:
@@ -66,17 +74,22 @@ class Models:
         self.lock = threading.Lock()
         print(f"[models] device={DEVICE} dtype={DTYPE}")
 
-        print(f"[models] loading classifier {config.CLASSIFIER_MODEL}")
-        self.cls_tok = AutoTokenizer.from_pretrained(config.CLASSIFIER_MODEL)
-        self.cls = DesklibDetector(config.CLASSIFIER_MODEL).to(DEVICE, DTYPE).eval()
+        print(f"[models] loading detector {config.TROPA_MODEL}")
+        path = snapshot_download(config.TROPA_MODEL, allow_patterns=MODEL_FILES)
+        self.tropa_tok = AutoTokenizer.from_pretrained(path)
+        self.tropa = MeanPoolDetector(path, 4).to(DEVICE, DTYPE).eval()  # human, ai, ai_edited, humanized
 
-        print(f"[models] loading Binoculars pair {config.OBSERVER_MODEL} / {config.PERFORMER_MODEL}")
-        self.lm_tok = AutoTokenizer.from_pretrained(config.OBSERVER_MODEL)
+        print(f"[models] loading detector {config.VANGUARD_MODEL}")
+        path = snapshot_download(config.VANGUARD_MODEL, allow_patterns=MODEL_FILES)
+        self.vanguard_tok = AutoTokenizer.from_pretrained(path)
+        self.vanguard = AutoModelForSequenceClassification.from_pretrained(path, dtype=DTYPE).to(DEVICE).eval()
+
+        print(f"[models] loading writer model {config.WRITER_MODEL}")
+        self.lm_tok = AutoTokenizer.from_pretrained(config.WRITER_MODEL)
         if self.lm_tok.pad_token is None:
             self.lm_tok.pad_token = self.lm_tok.eos_token
         self.lm_tok.padding_side = "right"
-        self.observer = AutoModelForCausalLM.from_pretrained(config.OBSERVER_MODEL, dtype=DTYPE).to(DEVICE).eval()
-        self.performer = AutoModelForCausalLM.from_pretrained(config.PERFORMER_MODEL, dtype=DTYPE).to(DEVICE).eval()
+        self.performer = AutoModelForCausalLM.from_pretrained(config.WRITER_MODEL, dtype=DTYPE).to(DEVICE).eval()
 
         print(f"[models] loading masked LM {config.MLM_MODEL}")
         self.mlm_tok = AutoTokenizer.from_pretrained(config.MLM_MODEL)
@@ -84,65 +97,46 @@ class Models:
         self.mlm = AutoModelForMaskedLM.from_pretrained(config.MLM_MODEL, dtype=DTYPE).to(DEVICE).eval()
         print("[models] ready")
 
-    # ------------------------------------------------------------------ classifier
+    # ------------------------------------------------------------------ detectors
     @torch.inference_mode()
-    def classifier_probs(self, texts: list[str], batch_size: int = 8) -> list[float]:
-        out: list[float] = []
+    def detect(self, texts: list[str], batch_size: int = 8) -> list[dict]:
+        """Per text: P(AI) from each detector, tropa's sub-classes, and the fused logit z."""
+        out = []
         for i in range(0, len(texts), batch_size):
-            enc = self.cls_tok(
-                texts[i : i + batch_size],
-                padding=True,
-                truncation=True,
-                max_length=768,
-                return_tensors="pt",
-            ).to(DEVICE)
-            logits = self.cls(enc["input_ids"], enc["attention_mask"]).float()
-            out.extend(torch.sigmoid(logits).tolist())
+            chunk = texts[i : i + batch_size]
+            enc = self.tropa_tok(chunk, padding=True, truncation=True, max_length=512, return_tensors="pt").to(DEVICE)
+            tp = torch.softmax(self.tropa(enc["input_ids"], enc["attention_mask"]).float(), -1)
+            enc = self.vanguard_tok(chunk, padding=True, truncation=True, max_length=512, return_tensors="pt").to(DEVICE)
+            vl = self.vanguard(**enc).logits.float()
+            vp = torch.sigmoid(vl[:, 0]) if vl.shape[1] == 1 else torch.softmax(vl, -1)[:, 1]
+            for t, v in zip(tp.tolist(), vp.tolist()):
+                p_tropa = 1 - t[0]
+                out.append({
+                    "tropa": p_tropa, "vanguard": v,
+                    "ai": t[1], "ai_edited": t[2], "humanized": t[3],
+                    "z": (_logit(p_tropa) + _logit(v)) / 2,
+                })
         return out
 
-    # ------------------------------------------------------------------ binoculars
+    # ------------------------------------------------------------------ word predictability
     @torch.inference_mode()
-    def binoculars(self, texts: list[str], batch_size: int = 2, max_tokens: int = 512):
-        """Return list of (score, token_info) where token_info is
-        [(char_start, char_end, prob_under_performer), ...] for each predicted token."""
+    def token_probs(self, texts: list[str], batch_size: int = 2, max_tokens: int = 512):
+        """[(char_start, char_end, probability), ...] per text: how predictable each token is."""
         results = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            enc = self.lm_tok(
-                batch,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=max_tokens,
-                return_offsets_mapping=True,
-            )
+            enc = self.lm_tok(batch, return_tensors="pt", padding=True, truncation=True,
+                              max_length=max_tokens, return_offsets_mapping=True)
             offsets = enc.pop("offset_mapping")
             enc = enc.to(DEVICE)
-            obs_logits = self.observer(**enc).logits[:, :-1].float()
-            perf_logits = self.performer(**enc).logits[:, :-1].float()
+            logits = self.performer(**enc).logits[:, :-1].float()
             targets = enc["input_ids"][:, 1:]
-            mask = enc["attention_mask"][:, 1:].float()
-
-            perf_logp = F.log_softmax(perf_logits, dim=-1)
-            tok_logp = perf_logp.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
-            log_ppl = -(tok_logp * mask).sum(1) / mask.sum(1).clamp(min=1)
-
-            obs_p = F.softmax(obs_logits, dim=-1)
-            x_ent = -(obs_p * perf_logp).sum(-1)
-            log_xppl = (x_ent * mask).sum(1) / mask.sum(1).clamp(min=1)
-            scores = (log_ppl / log_xppl).tolist()
-
-            probs = tok_logp.exp().cpu()
+            mask = enc["attention_mask"][:, 1:]
+            probs = F.log_softmax(logits, -1).gather(-1, targets.unsqueeze(-1)).squeeze(-1).exp().cpu()
             for b in range(len(batch)):
-                info = []
                 n = int(mask[b].sum().item())
-                for t in range(n):
-                    s, e = offsets[b, t + 1].tolist()
-                    info.append((s, e, float(probs[b, t])))
-                results.append((scores[b], info))
-            del obs_logits, perf_logits, perf_logp, obs_p, x_ent
-        if DEVICE == "cuda":
-            torch.cuda.empty_cache()
+                results.append([(*offsets[b, t + 1].tolist(), float(probs[b, t])) for t in range(n)])
+            del logits
         return results
 
     # ------------------------------------------------------------------ masked LM

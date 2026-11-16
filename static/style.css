@@ -223,3 +223,5 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 .dl-original-row { display: flex; gap: 8px; margin-bottom: 6px; }
 .dl-original-row #dlOriginal { flex: 1; }
 .dl-compress { white-space: nowrap; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.humanized-note { margin: 10px 0 0; font-size: 13px; }
+.word-honesty { margin-top: 6px; }

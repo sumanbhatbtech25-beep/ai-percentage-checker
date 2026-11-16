@@ -6,13 +6,13 @@ Pipeline
 2. Build overlapping windows of ~200 words (stride ~100) - the same idea
    Turnitin documents: segments of a few hundred words that overlap so every
    sentence is judged in context.
-3. Score every window with three independent signals:
-     a. supervised classifier (DeBERTa-v3-large, desklib)
-     b. zero-shot Binoculars (observer/performer LLM pair)
-     c. stylometry (AI-vocabulary density + "burstiness" of sentence lengths)
-4. Fuse the signals according to the strictness mode.
-5. Each sentence inherits the mean score of the windows that contain it,
-   lightly blended with a sentence-level classifier pass.
+3. Score every window with two 2026 detectors and average them (logit space):
+     a. tropa-mini (DeBERTa-v3-large; human / ai / ai_edited / humanized)
+     b. Vanguard (ModernBERT-large; 2nd place at PAN-CLEF 2026)
+   Stylometry (AI-typical vocabulary, uniform sentence length) is reported as a
+   hint and drives the "Why AI?" tips, but isn't part of the score.
+4. The strictness mode sets where the averaged score counts as AI.
+5. Each sentence inherits the mean score of the windows that contain it.
 6. AI % = share of words that sit in flagged sentences.
 7. Suggestions: AI-typical phrases (curated lexicon) + highly predictable
    words (per-token probability from the performer LM), with context-aware
@@ -33,15 +33,15 @@ WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*[A-Za-z]|[A-Za-z]")
 ABBREV = {"e.g", "i.e", "etc", "mr", "mrs", "ms", "dr", "prof", "vs", "fig", "al", "no", "st", "jr", "sr", "inc", "ltd", "co"}
 
 MODES = {
-    # Tuned with app/tune.py on pre-ChatGPT human writing (student essays, academic
-    # essays, arXiv abstracts) vs AI essays / ChatGPT answers.
-    #   cls_center: the DeBERTa classifier only counts as "AI" once it's more confident
-    #               than this. Raw 0.5 flagged ~48% of real student-essay sections.
-    #   w_cls / w_style: weights in the fused score (Binoculars gets the remainder).
-    #   threshold: a sentence is flagged when its fused score reaches this.
-    "standard": {"cls_center": 0.99, "w_cls": 0.80, "w_style": 0.05, "threshold": 0.54},
-    "strict": {"cls_center": 0.95, "w_cls": 0.60, "w_style": 0.05, "threshold": 0.48},
-    "very_hard": {"cls_center": 0.95, "w_cls": 0.50, "w_style": 0.05, "threshold": 0.36},
+    # center: the fused detector logit at which a section counts as AI (P = 0.5).
+    # Chosen by app/compare_detectors.py (Nov 2026) on 360 human texts (incl.
+    # non-native academic English) vs AI text from 2022-2026 models:
+    #   Balanced  4.1 -> human wrongly flagged 0%, 2026 AI caught 95%, ChatGPT 98%
+    #   Strict    3.0 -> human 3%,  2026 AI 98%, ChatGPT 100%
+    #   Very hard 1.5 -> human 5%,  2026 AI 98%, ChatGPT 100%
+    "standard": {"center": 4.1, "threshold": 0.5},
+    "strict": {"center": 3.0, "threshold": 0.5},
+    "very_hard": {"center": 1.5, "threshold": 0.5},
 }
 DEFAULT_MODE = "standard"
 
@@ -161,23 +161,9 @@ def style_score(sents: list[Sentence]) -> float:
 
 
 # --------------------------------------------------------------------------- fusion
-def _logit(p: float) -> float:
-    p = min(max(p, 1e-6), 1 - 1e-6)
-    return math.log(p / (1 - p))
-
-
-def calibrated_cls(pc: float, mode: str) -> float:
-    """Shift the classifier so that its own `cls_center` confidence maps to 0.5."""
-    return sigmoid(_logit(pc) - _logit(MODES[mode]["cls_center"]))
-
-
-def fuse(pc: float, pb: float, ps: float, mode: str) -> float:
-    m = MODES[mode]
-    return m["w_cls"] * calibrated_cls(pc, mode) + (1 - m["w_cls"] - m["w_style"]) * pb + m["w_style"] * ps
-
-
-def bino_prob(score: float) -> float:
-    return sigmoid((config.BINO_THRESHOLD - score) / config.BINO_SCALE)
+def window_prob(z: float, mode: str) -> float:
+    """Probability that a section is AI-written, from the two detectors' averaged logit."""
+    return sigmoid(z - MODES[mode]["center"])
 
 
 # --------------------------------------------------------------------------- qualifying text
@@ -253,11 +239,9 @@ class Raw:
     sents: list
     q: list            # indices (into sents) of qualifying sentences
     windows: list      # (a, b) index ranges into q
-    pcs: list          # classifier prob per window
-    bino: list         # raw Binoculars score per window
-    styles: list       # style score per window
-    sent_pc: dict      # sents index -> sentence-level classifier prob
-    token_probs: dict  # char offset -> list of token probabilities
+    det: list          # per window: {"tropa", "vanguard", "ai", "ai_edited", "humanized", "z"}
+    styles: list       # style score per window (shown as a hint; not part of the AI %)
+    token_probs: dict  # char offset -> list of token probabilities (for word suggestions)
 
 
 def collect_raw(text: str) -> Raw:
@@ -267,7 +251,8 @@ def collect_raw(text: str) -> Raw:
     qs = [sents[i] for i in q]
     windows = build_paragraph_windows(qs) if qs else []
     if not windows:
-        return Raw(text, sents, q, [], [], [], [], {}, {})
+        return Raw(text, sents, q, [], [], [], {})
+
     def window_text(a: int, b: int) -> tuple[str, bool]:
         """Contiguous slice of the document when nothing excluded sits in between
         (so token offsets map back), otherwise the prose sentences joined."""
@@ -279,22 +264,18 @@ def collect_raw(text: str) -> Raw:
     built = [window_text(a, b) for a, b in windows]
     win_texts = [t for t, _ in built]
     m = get_models()
-    long_idx = [i for i in q if sents[i].words >= 12]
 
-    def run(cls_batch: int, bino_batch: int):
-        pcs = m.classifier_probs(win_texts, batch_size=cls_batch)
-        bino = m.binoculars(win_texts, batch_size=bino_batch)
-        sent_pc = dict(zip(long_idx, m.classifier_probs([sents[i].text for i in long_idx], batch_size=cls_batch)))
-        return pcs, bino, sent_pc
+    def run(det_batch: int, lm_batch: int):
+        return m.detect(win_texts, batch_size=det_batch), m.token_probs(win_texts, batch_size=lm_batch)
 
     with m.lock:
         try:
-            pcs, bino, sent_pc = run(8, 2)
+            det, toks = run(8, 2)
         except Exception as e:  # GPU short on memory: free it and retry one item at a time
             if not is_oom(e):
                 raise
             free_gpu()
-            pcs, bino, sent_pc = run(1, 1)
+            det, toks = run(1, 1)
         finally:
             free_gpu()
     token_probs: dict[int, list[float]] = {}
@@ -302,24 +283,19 @@ def collect_raw(text: str) -> Raw:
         if not built[wi][1]:
             continue  # offsets only map back for contiguous windows
         base = qs[a].start
-        for s, e, p in bino[wi][1]:
-            token_probs.setdefault(base + s, []).append(p)
-    return Raw(text, sents, q, windows, pcs, [b[0] for b in bino],
-               [style_score(qs[a:b]) for a, b in windows], sent_pc, token_probs)
+        for st, en, pr in toks[wi]:
+            token_probs.setdefault(base + st, []).append(pr)
+    return Raw(text, sents, q, windows, det, [style_score(qs[a:b]) for a, b in windows], token_probs)
 
 
 def score_raw(raw: Raw, mode: str) -> tuple[list, list]:
     """Return (sentence scores aligned with raw.sents, None for excluded), window scores."""
-    win_scores = [fuse(pc, bino_prob(bs), ps, mode) for pc, bs, ps in zip(raw.pcs, raw.bino, raw.styles)]
+    win_scores = [window_prob(d["z"], mode) for d in raw.det]
     scores: list = [None] * len(raw.sents)
     for qi, si in enumerate(raw.q):
         covering = [win_scores[w] for w, (a, b) in enumerate(raw.windows) if a <= qi < b]
-        if not covering:
-            continue
-        pooled = sum(covering) / len(covering)
-        if si in raw.sent_pc:
-            pooled = 0.75 * pooled + 0.25 * calibrated_cls(raw.sent_pc[si], mode)
-        scores[si] = pooled
+        if covering:
+            scores[si] = sum(covering) / len(covering)  # each sentence inherits its windows' score
     return scores, win_scores
 
 
@@ -347,6 +323,10 @@ def analyze(text: str, mode: str = DEFAULT_MODE, with_suggestions: bool = True) 
     ai_percent = round(100 * flagged_words / q_words) if q_words else 0
 
     n = len(raw.windows)
+
+    def avg(key):
+        return sum(d[key] for d in raw.det) / n
+
     result = {
         "ai_percent": ai_percent,
         # Turnitin shows 1-19% as "*%" because false positives are more likely in that range
@@ -357,9 +337,11 @@ def analyze(text: str, mode: str = DEFAULT_MODE, with_suggestions: bool = True) 
         "excluded_words": excluded_words,
         "warnings": warnings,
         "signals": {
-            "classifier": round(sum(raw.pcs) / n, 3),
-            "binoculars": round(sum(bino_prob(b) for b in raw.bino) / n, 3),
-            "binoculars_raw": round(sum(raw.bino) / n, 4),
+            "tropa": round(avg("tropa"), 3),
+            "vanguard": round(avg("vanguard"), 3),
+            "ai_raw": round(avg("ai"), 3),             # tropa: plain AI output
+            "humanized": round(avg("humanized"), 3),   # tropa: AI text passed through a humanizer
+            "ai_edited": round(avg("ai_edited"), 3),   # tropa: human text polished by AI
             "style": round(sum(raw.styles) / n, 3),
             "document_score": round(sum(win_scores) / n, 3),
         },

@@ -116,9 +116,9 @@ def rewrite_paragraph(paragraph: str, mode: str = "standard", per_style: int = 1
     candidates.sort(key=lambda c: (c["ai_percent"], c["score"]))
     for c in candidates:
         c["note"] = (
-            "AI-generated rewrite: the deep classifier still recognises it as AI text. "
+            "AI-generated rewrite: the detectors still recognise it as AI text. "
             "Use it as a starting point and put it in your own words."
-            if c["signals"].get("classifier", 0) >= 0.5 else ""
+            if c["ai_percent"] >= 20 else ""
         )
     for c in candidates:
         c["better"] = (c["ai_percent"], c["score"]) < (orig["ai_percent"], orig["signals"].get("document_score", 1))
