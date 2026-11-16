@@ -3,7 +3,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -23,6 +23,21 @@ app = FastAPI(title="Report Program", docs_url=None, redoc_url=None, openapi_url
 # then the phone-mode password check.
 app.middleware("http")(access.middleware)
 app.middleware("http")(security.middleware)
+
+
+@app.exception_handler(Exception)
+async def _friendly_errors(request: Request, exc: Exception):
+    """Never show a raw crash page: give the user a plain message (details stay in the server log)."""
+    from .models import free_gpu, is_oom
+
+    if is_oom(exc):
+        free_gpu()
+        return JSONResponse({"detail": "The graphics card ran out of memory. Please try again; if it keeps happening, "
+                                       "close other GPU-heavy apps or restart Report Program."}, status_code=503)
+    import traceback
+
+    traceback.print_exception(exc)
+    return JSONResponse({"detail": "Something went wrong on the server. Please try again."}, status_code=500)
 
 
 @app.get("/login")
@@ -151,6 +166,28 @@ class ReportIn(BaseModel):
     id: str | None = None
     title: str | None = None
     ai_percent: int | None = None
+    original_b64: str | None = None   # the uploaded .docx, sent once so downloads keep its formatting
+    original_name: str | None = None
+
+
+def _decode_docx(b64: str | None) -> bytes | None:
+    """Decode and sanity-check an uploaded original .docx (size-limited, must open as Word)."""
+    if not b64:
+        return None
+    import base64
+    import binascii
+    import io as _io
+
+    if len(b64) > 28_000_000:
+        raise HTTPException(413, "Original file too large (20 MB max)")
+    try:
+        data = base64.b64decode(b64, validate=True)
+        from docx import Document
+
+        Document(_io.BytesIO(data))
+    except (binascii.Error, ValueError, Exception):
+        raise HTTPException(400, "The original file isn't a valid .docx")
+    return data
 
 
 @app.get("/api/reports")
@@ -171,7 +208,8 @@ def reports_save(body: ReportIn):
     if not body.text.strip():
         raise HTTPException(400, "Nothing to save")
     try:
-        return reports.save_report(body.text, body.mode, body.id, body.title, body.ai_percent)
+        return reports.save_report(body.text, body.mode, body.id, body.title, body.ai_percent,
+                                   _decode_docx(body.original_b64), body.original_name)
     except ValueError:
         raise HTTPException(400, "Invalid report id")
 
@@ -200,6 +238,40 @@ def reports_delete(report_id: str):
 @app.get("/papers")
 def papers_page():
     return FileResponse(STATIC / "papers.html")
+
+
+class ExportOriginalIn(BaseModel):
+    text: str
+    report_id: str | None = None      # use the original stored with a saved report...
+    original_b64: str | None = None   # ...or the one the page still holds
+    filename: str | None = None
+
+
+@app.post("/api/export-original")
+def export_original(body: ExportOriginalIn):
+    """Write the edited wording back into the user's own .docx, keeping all formatting."""
+    import re as _re
+    from urllib.parse import quote
+
+    from .docx_edit import apply_edits_to_docx
+
+    data = _decode_docx(body.original_b64)
+    if data is None and body.report_id:
+        try:
+            data = reports.get_original(body.report_id)
+        except ValueError:
+            data = None
+    if data is None:
+        raise HTTPException(404, "The original Word file isn't available. Upload the .docx again to download with its formatting.")
+    out, stats = apply_edits_to_docx(data, body.text[: config.MAX_CHARS])
+    stem = _re.sub(r"\.docx$", "", body.filename or "report", flags=_re.I)
+    name = f"{stem} (revised).docx"
+    return Response(out, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={
+        "Content-Disposition": f"attachment; filename=\"revised.docx\"; filename*=UTF-8''{quote(name)}",
+        "X-Changes": str(stats["changes"]),
+        "X-Paragraphs-Changed": str(stats["paragraphs_changed"]),
+        "X-Structure-Changes": str(stats["structure_changes"]),
+    })
 
 
 @app.post("/api/export-docx")

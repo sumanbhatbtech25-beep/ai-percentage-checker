@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="/static/icon.png">
-  <script src="/static/boot.js?v=1"></script>
+  <script src="/static/boot.js?v=2"></script>
   <title>AI Checker · Report Program</title>
-  <link rel="stylesheet" href="/static/style.css?v=18">
+  <link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body>
 <header class="topbar">
@@ -79,11 +79,11 @@
           <div class="legend">
             <span><i class="sw high"></i>Likely AI paragraph</span>
             <span><i class="sw mid"></i>Borderline paragraph</span>
-            <span class="editor-only"><i class="uline">word ▾</i>Tap a highlighted word to change it</span>
+            <span><i class="uline">word ▾</i>Tap a highlighted word to change it</span>
           </div>
           <div class="tools">
             <button id="toEditor" class="primary checker-only">Fix it in the Editor →</button>
-            <span class="undo-redo editor-only"><button id="undoBtn" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button><button id="redoBtn" class="icon-btn" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↷</button></span>
+            <span class="undo-redo"><button id="undoBtn" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button><button id="redoBtn" class="icon-btn" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↷</button></span>
             <button id="fixAll" class="fix-all editor-only" title="Swap every highlighted word for its top suggestion">Fix all</button>
             <button id="editToggle" class="editor-only">Edit text</button>
             <span class="save-wrap"><button id="saveReport" class="save-btn">Save report</button><span id="saveStatus" class="muted tiny"></span></span>
@@ -123,15 +123,17 @@
           <button class="primary" id="toEditor2">Fix it in the Editor →</button>
         </div>
 
-        <div class="card editor-only">
+        <div class="card">
           <h3>Word suggestions <span id="suggCount" class="pill"></span></h3>
           <p class="muted tiny">Tap any highlighted word in the document to pick a replacement, then press <b>Re-check score</b>.</p>
           <ol id="suggList" class="sugg-list"></ol>
         </div>
 
         <div class="card editor-only">
-          <h3>Download revised text</h3>
-          <div class="row"><button id="dlDocx">.docx</button><button id="dlTxt">.txt</button><button id="copy">Copy</button></div>
+          <h3>Download your report</h3>
+          <button id="dlOriginal" class="primary dl-original" hidden>Download .docx (keeps your formatting)</button>
+          <p id="dlNote" class="muted tiny dl-note"></p>
+          <div class="row"><button id="dlDocx" title="Plain Word file: text only, no original formatting">Plain .docx</button><button id="dlTxt">.txt</button><button id="copy">Copy</button></div>
         </div>
       </aside>
     </div>
@@ -143,6 +145,6 @@
 
 <script src="/static/nav.js?v=3"></script>
 <script src="/static/confetti.js?v=1"></script>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=18"></script>
 </body>
 </html>

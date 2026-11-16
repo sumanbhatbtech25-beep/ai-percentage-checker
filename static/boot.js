@@ -19,3 +19,13 @@ window.safeUrl = function safeUrl(u) {
     return "#";
   }
 };
+
+// Read a server reply safely: a crash page or network hiccup becomes a plain message
+// instead of "Unexpected token ... is not valid JSON".
+window.readJson = async function readJson(r) {
+  try {
+    return await r.json();
+  } catch {
+    return { detail: `The server had a problem (error ${r.status}). Please try again.` };
+  }
+};

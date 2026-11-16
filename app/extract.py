@@ -4,12 +4,15 @@ import io
 from docx import Document
 from pypdf import PdfReader
 
+from .docx_edit import docx_paragraphs
+
 
 def extract_text(filename: str, data: bytes) -> str:
     name = filename.lower()
     if name.endswith(".docx"):
         doc = Document(io.BytesIO(data))
-        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        # same paragraph rule docx_edit uses to write changes back into this file
+        return "\n".join(p.text for p in docx_paragraphs(doc))
     if name.endswith(".pdf"):
         reader = PdfReader(io.BytesIO(data))
         pages = [(page.extract_text() or "") for page in reader.pages]

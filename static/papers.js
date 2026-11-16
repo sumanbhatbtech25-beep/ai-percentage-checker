@@ -12,7 +12,7 @@ async function loadFile(file) {
   const fd = new FormData();
   fd.append("file", file);
   const r = await fetch("/api/extract", { method: "POST", body: fd });
-  const j = await r.json();
+  const j = await readJson(r);
   if (!r.ok) { $("filename").textContent = j.detail || "Could not read file"; return; }
   $("text").value = j.text;
   $("filename").textContent = file.name;
@@ -35,7 +35,7 @@ async function search() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, query }),
     });
-    const j = await r.json();
+    const j = await readJson(r);
     if (!r.ok) throw new Error(j.detail || "Search failed");
     render(j);
     $("busy").hidden = true;
@@ -63,7 +63,7 @@ function compareWithProject(text, papers) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, papers: papers.map((p) => ({ title: p.title, year: p.year, abstract_full: p.abstract_full || p.abstract })) }),
   })
-    .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.detail || "Comparison failed"); return j.comparisons; })
+    .then(async (r) => { const j = await readJson(r); if (!r.ok) throw new Error(j.detail || "Comparison failed"); return j.comparisons; })
     .catch((e) => papers.map(() => ({ error: `Couldn't compare: ${e.message}` })));
 }
 

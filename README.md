@@ -15,6 +15,8 @@ Three tools for getting a report ready to hand in, all running locally on your G
 
 **Editor extras:** **↶ / ↷ undo and redo** (Ctrl+Z / Ctrl+Y) for every single change, and **Fix all** / **Undo all**.
 
+**Your file's format is kept:** upload a **.docx** and "Download .docx (keeps your formatting)" writes only the changed wording back into **your original Word file**. Fonts, bold and italics, headings, numbering, tables, images, the cover page, headers and footers and the page layout stay exactly as they were. Unchanged paragraphs stay byte-for-byte identical. (`app/docx_edit.py` diffs the text word by word and edits only the affected runs. Tested on 500 random edit sets: all exact.) The original file is saved, encrypted, with the report, so this also works after **Continue this report**. PDFs can't be edited in place, so upload the .docx version to keep formatting.
+
 **Similarity check:** a card on the checker and editor finds sentences **copied** or **closely paraphrased** from research papers on your topic, and whether you cited them. It compares against the abstracts of the top 10 papers from OpenAlex and Semantic Scholar, not the whole web or other students' work.
 
 **Research Papers:** each of the top 5 papers has two buttons, **How your project differs** and **What you can improve**. Each comparison is grounded in the parts of the paper's abstract your report doesn't cover, then summarised by the local Qwen model. Only abstracts are used.

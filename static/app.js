@@ -7,7 +7,8 @@ if (EDITOR) document.title = "Editor · Report Program";
 // "Fix it in the Editor" hands the current text over to /editor, which re-runs it there
 function openInEditor() {
   try {
-    sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value, reportId: state.reportId, title: state.title }));
+    const orig = state.original && (!state.original.b64 || state.original.b64.length < 3_000_000) ? state.original : null;
+    sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value, reportId: state.reportId, title: state.title, original: orig, originalSaved: state.originalSaved }));
   } catch {}
   state.leaving = true; // a saved report carries over, so no "unsaved changes" warning
   location.href = state.reportId ? `/editor?report=${state.reportId}` : "/editor";
@@ -21,6 +22,7 @@ function takeHandoff() {
   $("input").value = h.text;
   if (h.mode) $("mode").value = h.mode;
   if (h.reportId) { state.reportId = h.reportId; state.title = h.title || ""; state.savedText = h.text; }
+  if (h.original) { state.original = h.original; state.originalSaved = !!h.originalSaved; }
   updateCheckBtn();
   runAnalysis(h.text);
   return true;
@@ -56,12 +58,26 @@ async function loadFile(file) {
   const fd = new FormData();
   fd.append("file", file);
   const r = await fetch("/api/extract", { method: "POST", body: fd });
-  const j = await r.json();
+  const j = await readJson(r);
   if (!r.ok) { $("filename").textContent = j.detail || "Could not read file"; return; }
   $("input").value = j.text;
   $("filename").textContent = file.name;
   state.title = file.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim();
+  // keep the original Word file so the download can keep its exact formatting
+  const lower = file.name.toLowerCase();
+  state.original = lower.endsWith(".docx") ? { name: file.name, kind: "docx", b64: await fileToBase64(file) }
+    : { name: file.name, kind: lower.endsWith(".pdf") ? "pdf" : "txt" };
+  state.originalSaved = false;
   updateCheckBtn();
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(",")[1] || "");
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
 }
 $("file").addEventListener("change", (e) => e.target.files[0] && loadFile(e.target.files[0]));
 const drop = $("drop");
@@ -79,7 +95,7 @@ async function runAnalysis(text) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, mode: $("mode").value }),
     });
-    const j = await r.json();
+    const j = await readJson(r);
     if (!r.ok) throw new Error(j.detail || "Analysis failed");
     state.text = text.replace(/\r\n/g, "\n");
     state.result = j;
@@ -112,6 +128,7 @@ function renderAll() {
   renderParaList();
   renderStale();
   renderUndoRedo();
+  renderDownload();
 }
 
 function renderScore() {
@@ -161,7 +178,7 @@ function renderRange(a, b) {
     // colour is applied per paragraph (see .para.lvl-*), not per sentence
     const cls = "";
     let inner = "", p = s.start;
-    if (EDITOR) r.suggestions.forEach((g, i) => {
+    r.suggestions.forEach((g, i) => {  // word dropdowns on both Checker and Editor
       if (g.start < s.start || g.end > s.end) return;
       inner += esc(text.slice(p, g.start));
       const c = `w sev-${g.severity}${g.applied ? " applied" : ""}`;
@@ -294,7 +311,7 @@ async function generateRewrites(i) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: state.text.slice(p.start, p.end), mode: state.result.mode }),
     });
-    const j = await r.json();
+    const j = await readJson(r);
     if (!r.ok) throw new Error(j.detail || "Rewrite failed");
     state.panels[i] = { data: j };
   } catch (e) {
@@ -358,12 +375,16 @@ async function saveReport() {
   try {
     const r = await fetch("/api/reports", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: state.reportId, text: textAtSave, mode: $("mode").value, title: state.title || null, ai_percent: state.result?.ai_percent ?? null }),
+      body: JSON.stringify({
+        id: state.reportId, text: textAtSave, mode: $("mode").value, title: state.title || null, ai_percent: state.result?.ai_percent ?? null,
+        ...(state.original?.b64 && !state.originalSaved ? { original_b64: state.original.b64, original_name: state.original.name } : {}),
+      }),
     });
-    const j = await r.json();
+    const j = await readJson(r);
     if (!r.ok) throw new Error(j.detail || "Couldn't save");
     state.reportId = j.id;
     state.title = j.title;
+    if (state.original?.b64) state.originalSaved = true;
     state.savedText = textAtSave;
     state.savedScore = j.ai_percent;
     const url = new URL(location.href);
@@ -388,11 +409,13 @@ async function loadSavedFromUrl() {
   try {
     const r = await fetch(`/api/reports/${encodeURIComponent(id)}`);
     if (!r.ok) throw new Error("This saved report no longer exists.");
-    const d = await r.json();
+    const d = await readJson(r);
     state.reportId = d.id;
     state.title = d.title;
     state.savedText = d.text;
     state.savedScore = d.ai_percent;
+    state.original = d.original_name ? { name: d.original_name, kind: "docx" } : null; // file itself stays (encrypted) on this computer
+    state.originalSaved = !!d.original_name;
     $("input").value = d.text;
     if (d.mode) $("mode").value = d.mode;
     updateCheckBtn();
@@ -549,7 +572,7 @@ async function runSimilarity() {
     const r = await fetch("/api/similarity", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: state.text }),
     });
-    const j = await r.json();
+    const j = await readJson(r);
     if (!r.ok) throw new Error(j.detail || "Similarity check failed");
     state.sim = { ...j, text: state.text };
     renderSimilarity();
@@ -671,7 +694,7 @@ function renderUndoRedo() {
 $("undoBtn")?.addEventListener("click", undo);
 $("redoBtn")?.addEventListener("click", redo);
 document.addEventListener("keydown", (e) => {
-  if (!EDITOR || state.editing || !(e.ctrlKey || e.metaKey)) return;
+  if (state.editing || !(e.ctrlKey || e.metaKey)) return;
   if (e.target.closest && e.target.closest("input, textarea, select")) return; // let text fields keep their own undo
   const k = e.key.toLowerCase();
   if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
@@ -756,7 +779,7 @@ $("newDoc").addEventListener("click", () => {
   if (hasUnsaved() && !confirm("You have unsaved changes. Start a new document anyway?")) return;
   $("report").hidden = true; $("submit").hidden = false;
   $("input").value = ""; $("filename").textContent = "";
-  Object.assign(state, { reportId: null, title: "", savedText: "", result: null, edits: 0, undo: null, history: [], future: [], sim: null });
+  Object.assign(state, { reportId: null, title: "", savedText: "", result: null, edits: 0, undo: null, history: [], future: [], sim: null, original: null, originalSaved: false });
   $("simOut").innerHTML = ""; $("simRun").textContent = "Run similarity check";
   const url = new URL(location.href); url.searchParams.delete("report"); history.replaceState(null, "", url);
   renderSaveStatus();
@@ -765,6 +788,40 @@ $("newDoc").addEventListener("click", () => {
 
 // ------------------------------------------------------------------ export
 const currentText = () => (state.editing ? $("editor").value : state.text);
+function renderDownload() {
+  const o = state.original;
+  $("dlOriginal").hidden = !(o && o.kind === "docx");
+  $("dlNote").textContent = o?.kind === "docx"
+    ? `Writes your changes into “${o.name}”. Fonts, headings, tables, images and layout stay exactly as they were.`
+    : o?.kind === "pdf"
+      ? "PDF formatting can't be edited. Upload the .docx version of your report to download it with its formatting."
+      : "Tip: upload your report as a .docx to download it with its original formatting.";
+}
+
+$("dlOriginal").addEventListener("click", async () => {
+  const o = state.original, btn = $("dlOriginal");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Preparing your file…";
+  try {
+    const useReport = !o.b64 || (state.reportId && state.originalSaved);
+    const r = await fetch("/api/export-original", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: currentText(), filename: o.name, ...(useReport ? { report_id: state.reportId } : { original_b64: o.b64 }) }),
+    });
+    if (!r.ok) throw new Error((await readJson(r)).detail || "Download failed");
+    const changes = +r.headers.get("X-Changes"), merged = +r.headers.get("X-Structure-Changes");
+    download(await r.blob(), o.name.replace(/\.docx$/i, "") + " (revised).docx");
+    $("dlNote").textContent = `Downloaded: ${changes} wording change${changes === 1 ? "" : "s"} written into your original file, formatting kept.` +
+      (merged ? ` Note: ${merged} paragraph join${merged === 1 ? " was" : "s were"} kept as separate paragraphs to protect the layout.` : "");
+  } catch (e) {
+    $("dlNote").textContent = e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
+
 $("dlTxt").addEventListener("click", () => download(new Blob([currentText()], { type: "text/plain" }), "revised.txt"));
 $("dlDocx").addEventListener("click", async () => {
   const r = await fetch("/api/export-docx", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: currentText() }) });

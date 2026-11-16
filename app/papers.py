@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
 
 from .lexicon import AI_PHRASES, STOPWORDS
-from .models import DEVICE
+from .models import HELPER_DEVICE
 
 EMBED_MODEL = os.environ.get("AIC_EMBED", "BAAI/bge-small-en-v1.5")
 OPENALEX_KEY = os.environ.get("OPENALEX_API_KEY", "")
@@ -49,7 +49,7 @@ def _get_embedder():
     with _embed_lock:
         if _embed is None:
             tok = AutoTokenizer.from_pretrained(EMBED_MODEL)
-            model = AutoModel.from_pretrained(EMBED_MODEL).to(DEVICE).eval()
+            model = AutoModel.from_pretrained(EMBED_MODEL).to(HELPER_DEVICE).eval()  # CPU: leaves GPU for detectors
             _embed = (tok, model)
     return _embed
 
@@ -59,7 +59,7 @@ def embed(texts: list[str], batch_size: int = 32) -> torch.Tensor:
     tok, model = _get_embedder()
     out = []
     for i in range(0, len(texts), batch_size):
-        enc = tok(texts[i : i + batch_size], padding=True, truncation=True, max_length=512, return_tensors="pt").to(DEVICE)
+        enc = tok(texts[i : i + batch_size], padding=True, truncation=True, max_length=512, return_tensors="pt").to(HELPER_DEVICE)
         cls = model(**enc).last_hidden_state[:, 0]  # bge uses CLS pooling
         out.append(F.normalize(cls.float(), dim=-1).cpu())
     return torch.cat(out) if out else torch.empty(0)

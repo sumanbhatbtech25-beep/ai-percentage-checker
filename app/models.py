@@ -26,6 +26,9 @@ from . import config
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
+# The paper-matching embedder runs on the CPU (it's not on the analysis path),
+# which keeps the 8 GB GPU free for the detectors and avoids out-of-memory errors.
+HELPER_DEVICE = "cpu"
 
 
 class DesklibDetector(nn.Module):
@@ -77,6 +80,7 @@ class Models:
 
         print(f"[models] loading masked LM {config.MLM_MODEL}")
         self.mlm_tok = AutoTokenizer.from_pretrained(config.MLM_MODEL)
+        # small (~250 MB) and used on every analysis, so it stays on the GPU for speed
         self.mlm = AutoModelForMaskedLM.from_pretrained(config.MLM_MODEL, dtype=DTYPE).to(DEVICE).eval()
         print("[models] ready")
 
@@ -192,3 +196,16 @@ def get_models() -> Models:
         if _models is None:
             _models = Models()
     return _models
+
+
+def free_gpu() -> None:
+    """Return cached GPU memory after a heavy job so the next one has room."""
+    if DEVICE == "cuda":
+        import gc
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+def is_oom(e: BaseException) -> bool:
+    return isinstance(e, torch.OutOfMemoryError) or "out of memory" in str(e).lower()

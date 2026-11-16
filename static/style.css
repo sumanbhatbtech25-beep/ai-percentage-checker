@@ -218,3 +218,5 @@ select { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; ba
 @media (prefers-reduced-motion: reduce) { .para.flash { animation: none; outline: 2px solid var(--accent); } }
 .accuracy-note { margin: 10px 0 0; }
 .sim-item.similar { opacity: .85; }
+.dl-original { width: 100%; margin-bottom: 6px; }
+.dl-note { margin: 0 0 8px; }

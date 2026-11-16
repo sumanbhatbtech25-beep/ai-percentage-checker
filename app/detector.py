@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from . import config
 from .lexicon import STOPWORDS, alternatives_for, find_lexicon_hits
-from .models import get_models
+from .models import free_gpu, get_models, is_oom
 
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*[A-Za-z]|[A-Za-z]")
 ABBREV = {"e.g", "i.e", "etc", "mr", "mrs", "ms", "dr", "prof", "vs", "fig", "al", "no", "st", "jr", "sr", "inc", "ltd", "co"}
@@ -279,11 +279,24 @@ def collect_raw(text: str) -> Raw:
     built = [window_text(a, b) for a, b in windows]
     win_texts = [t for t, _ in built]
     m = get_models()
+    long_idx = [i for i in q if sents[i].words >= 12]
+
+    def run(cls_batch: int, bino_batch: int):
+        pcs = m.classifier_probs(win_texts, batch_size=cls_batch)
+        bino = m.binoculars(win_texts, batch_size=bino_batch)
+        sent_pc = dict(zip(long_idx, m.classifier_probs([sents[i].text for i in long_idx], batch_size=cls_batch)))
+        return pcs, bino, sent_pc
+
     with m.lock:
-        pcs = m.classifier_probs(win_texts)
-        bino = m.binoculars(win_texts)
-        long_idx = [i for i in q if sents[i].words >= 12]
-        sent_pc = dict(zip(long_idx, m.classifier_probs([sents[i].text for i in long_idx])))
+        try:
+            pcs, bino, sent_pc = run(8, 2)
+        except Exception as e:  # GPU short on memory: free it and retry one item at a time
+            if not is_oom(e):
+                raise
+            free_gpu()
+            pcs, bino, sent_pc = run(1, 1)
+        finally:
+            free_gpu()
     token_probs: dict[int, list[float]] = {}
     for wi, (a, b) in enumerate(windows):
         if not built[wi][1]:
@@ -495,8 +508,17 @@ def build_suggestions(text, sents, sent_scores, thr, token_probs, max_predictabl
 
     targets = targets[:max_total]
     if targets:
+        items = [(ctx, a, b) for *_, ctx, a, b in targets]
         with m.lock:
-            cand_lists = m.mlm_candidates([(ctx, a, b) for *_, ctx, a, b in targets])
+            try:
+                cand_lists = m.mlm_candidates(items)
+            except Exception as e:  # GPU short on memory: free it and retry in small batches
+                if not is_oom(e):
+                    raise
+                free_gpu()
+                cand_lists = m.mlm_candidates(items, batch_size=4)
+            finally:
+                free_gpu()
         for (p, A, B, w, *_), cands in zip(targets, cand_lists):
             alts = []
             for c, _prob in cands:
