@@ -31,6 +31,11 @@ ICON = Path(__file__).resolve().parent.parent / "static" / "icon.png"
 SAME_SITE = {"Origin": "http://localhost:8000", "Sec-Fetch-Site": "same-origin"}
 
 
+def local_client(**kw) -> TestClient:
+    """A browser on this computer (the server only trusts 127.0.0.1)."""
+    return TestClient(app, base_url="http://localhost:8000", client=("127.0.0.1", 50000), **kw)
+
+
 def make_docx(paragraphs: int = 40) -> bytes:
     """A small report with the things that must survive: mixed formatting, a table, an image."""
     d = Document()
@@ -97,7 +102,7 @@ class LengthLimitTests(unittest.TestCase):
     """Long reports are refused with a message, never silently cut (a cut used to delete their end)."""
 
     def setUp(self):
-        self.c = TestClient(app, base_url="http://localhost:8000")
+        self.c = local_client()
 
     def test_long_report_refused_not_cut(self):
         big = make_docx(paragraphs=1300)  # about 20,000+ words, over the limit
@@ -124,7 +129,7 @@ class LengthLimitTests(unittest.TestCase):
 
 class SecurityTests(unittest.TestCase):
     def setUp(self):
-        self.c = TestClient(app, base_url="http://localhost:8000")
+        self.c = local_client()
 
     def test_unknown_host_is_refused(self):  # blocks DNS rebinding
         self.assertEqual(self.c.get("/api/reports", headers={"Host": "evil.example"}).status_code, 421)
@@ -155,9 +160,38 @@ class SecurityTests(unittest.TestCase):
             security._lan = (0.0, set())
 
 
+class LaunchKeyTests(unittest.TestCase):
+    """Only the Windows account that started Report Program can open it (shared PCs)."""
+
+    def setUp(self):
+        self.old_key, access.LOCAL_KEY = access.LOCAL_KEY, "test-launch-key-123"
+
+    def tearDown(self):
+        access.LOCAL_KEY = self.old_key
+
+    def test_locked_without_the_key(self):
+        c = local_client(follow_redirects=False)
+        self.assertEqual(c.get("/").status_code, 401)
+        self.assertEqual(c.get("/api/reports").status_code, 401)
+        self.assertEqual(c.get("/?key=wrong-key").status_code, 401)
+
+    def test_key_opens_it_and_is_removed_from_the_address(self):
+        c = local_client(follow_redirects=False)
+        r = c.get("/editor?key=test-launch-key-123&report=abc")
+        self.assertEqual(r.status_code, 303)
+        self.assertEqual(r.headers["location"], "/editor?report=abc")
+        self.assertIn("aic_session", r.cookies)
+        c.cookies.set("aic_session", r.cookies["aic_session"])
+        self.assertEqual(c.get("/api/reports").status_code, 200)
+
+    def test_other_devices_are_refused_when_phone_mode_is_off(self):
+        other = TestClient(app, base_url="http://localhost:8000", client=("192.168.1.50", 50000))
+        self.assertEqual(other.get("/api/reports").status_code, 403)
+
+
 class ReportStorageTests(unittest.TestCase):
     def setUp(self):
-        self.c = TestClient(app, base_url="http://localhost:8000")
+        self.c = local_client()
 
     def test_saved_reports_are_encrypted_on_disk(self):
         rid = reports.save_report("Confidential thesis text", ai_percent=10)["id"]

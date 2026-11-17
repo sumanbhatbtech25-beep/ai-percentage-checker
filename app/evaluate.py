@@ -127,20 +127,14 @@ def collect(n: int = 60) -> None:
 
 # ----------------------------------------------------------------------------- offline scoring
 def doc_percent(item: dict, mode: str) -> int:
-    """Same scoring as detector.score_raw/analyze, run on cached raw signals."""
-    from .detector import MODES, window_prob
+    """AI % for one cached document, using the app's own scoring (detector.score_raw)."""
+    from .detector import MODES, Raw, score_raw
 
-    thr = MODES[mode]["threshold"]
-    win = [window_prob(z, mode) for z in item["z"]]
-    flagged = total = 0
-    for qi, si in enumerate(item["q"]):
-        cov = [win[w] for w, (a, b) in enumerate(item["windows"]) if a <= qi < b]
-        if not cov:
-            continue
-        sc = sum(cov) / len(cov)
-        w = item["words"][si]
-        total += w
-        flagged += w if sc >= thr else 0
+    raw = Raw("", [None] * len(item["words"]), item["q"], item["windows"], [{"z": z} for z in item["z"]], [], {})
+    scores, _ = score_raw(raw, mode)
+    scored = [(w, sc) for w, sc in zip(item["words"], scores) if sc is not None]
+    total = sum(w for w, _ in scored)
+    flagged = sum(w for w, sc in scored if sc >= MODES[mode]["threshold"])
     return round(100 * flagged / total) if total else 0
 
 

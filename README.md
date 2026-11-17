@@ -40,7 +40,7 @@ See [RESEARCH.md](RESEARCH.md) for how detectors work, why their numbers differ,
 
 ## Run
 
-Double-click the **Report Program** shortcut on the Desktop, or run `run.bat`. It starts the server in a minimised window and opens http://localhost:8000. If the server is already running, it just opens the browser. Close the window to stop the server. The first start downloads about 8 GB of models into `~/.cache/huggingface`. After that, models take about 30 s to load.
+Double-click the **Report Program** shortcut on the Desktop, or run `run.bat`. It starts the server in a minimised window and opens http://localhost:8000. If the server is already running, it just opens the browser. Always open it this way: a bookmarked `http://localhost:8000` shows "Locked" until you use the shortcut (see Security). Close the window to stop the server. The first start downloads about 8 GB of models into `~/.cache/huggingface`. After that, models take about 30 s to load.
 
 To recreate the Desktop shortcut:
 ```bash
@@ -59,6 +59,7 @@ Users' reports are private work, so the app is locked down:
 | Someone reading the files on disk | Encrypted with **Windows DPAPI**: only your Windows account on this computer can decrypt them. |
 | Text leaving the computer | Detection, editing, comparison and similarity all run locally. Only short **keyword** searches go to the paper databases, never your text. |
 | Other computers on the network | The server only listens on this computer (`127.0.0.1`), except in phone mode, which requires a password. |
+| Other Windows accounts on a shared PC | Each launch creates a random **launch key**, saved in your own `%LOCALAPPDATA%\ReportProgram\launch.key`, which other accounts can't read. The Desktop shortcut opens the site with it once, and it becomes a login cookie. Without it the site shows "Locked" and refuses to list or open reports. |
 | Malicious websites you visit in your browser | A host allow-list blocks DNS-rebinding, and Origin / Sec-Fetch-Site checks block cross-site saves, renames and deletes. |
 | Injected scripts (XSS) | A strict Content-Security-Policy (only the site's own scripts), all text escaped, outside links restricted to http(s). |
 | Clickjacking, leaks, caching | `frame-ancestors 'none'`, `no-referrer`, and `Cache-Control: no-store` on every API response. |

@@ -26,6 +26,11 @@ if "%AIC_PASSWORD%"=="" (
 rem find this computer's Wi-Fi / Ethernet address
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -in 'Dhcp','Manual' -and $_.IPAddress -notlike '169.254*' -and $_.InterfaceAlias -notmatch 'vEthernet|VirtualBox|VMware|Loopback|VPN|Tun' } | Select-Object -First 1).IPAddress"`) do set LANIP=%%i
 
+rem launch key for this computer (see run.bat); the phone uses the password instead
+if not exist "%LOCALAPPDATA%\ReportProgram" mkdir "%LOCALAPPDATA%\ReportProgram"
+for /f "usebackq delims=" %%k in (`.venv\Scripts\python -c "import secrets; print(secrets.token_urlsafe(24))"`) do set AIC_LOCAL_KEY=%%k
+> "%LOCALAPPDATA%\ReportProgram\launch.key" echo %AIC_LOCAL_KEY%
+
 cls
 echo.
 echo  ==============================================================
@@ -38,5 +43,5 @@ echo  choose "Private networks" and click Allow.
 echo  This computer opens the site without a password.
 echo  Keep this window open; close it to stop.
 echo.
-start "" /b cmd /c "timeout /t 4 /nobreak >nul & start "" http://localhost:%PORT%"
+start "" /b cmd /c "timeout /t 4 /nobreak >nul & start "" http://localhost:%PORT%/?key=%AIC_LOCAL_KEY%"
 .venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port %PORT%

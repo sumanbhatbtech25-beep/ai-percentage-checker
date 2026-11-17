@@ -2,10 +2,6 @@
 #   pip install torch --index-url https://download.pytorch.org/whl/cu128
 torch
 transformers
-accelerate
-sentencepiece
-protobuf
-tiktoken
 safetensors
 huggingface_hub
 fastapi
