@@ -65,7 +65,8 @@ async function loadFile(file) {
   state.title = file.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim();
   // keep the original Word file so the download can keep its exact formatting
   const lower = file.name.toLowerCase();
-  state.original = lower.endsWith(".docx") ? { name: file.name, kind: "docx", b64: await fileToBase64(file) }
+  // `text` remembers what this file produced, so pasting other text can never be written into it
+  state.original = lower.endsWith(".docx") ? { name: file.name, kind: "docx", b64: await fileToBase64(file), text: j.text }
     : { name: file.name, kind: lower.endsWith(".pdf") ? "pdf" : "txt" };
   state.originalSaved = false;
   updateCheckBtn();
@@ -85,7 +86,17 @@ const drop = $("drop");
 ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", (e) => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
 
-$("check").addEventListener("click", () => runAnalysis($("input").value));
+$("check").addEventListener("click", () => {
+  const text = $("input").value;
+  // The box no longer holds the uploaded file's text (other text was pasted or it was changed):
+  // detach the file, or the formatted download would write this text into the wrong document.
+  const clean = (t) => String(t || "").replace(/\r\n/g, "\n");
+  if (state.original?.text !== undefined && clean(text) !== clean(state.original.text)) {
+    state.original = null;
+    state.originalSaved = false;
+  }
+  runAnalysis(text);
+});
 $("recheck").addEventListener("click", () => { finishEditing(); runAnalysis(state.text); });
 
 async function runAnalysis(text) {

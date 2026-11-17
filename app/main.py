@@ -64,6 +64,15 @@ def _warm():
     threading.Thread(target=get_models, daemon=True).start()
 
 
+def _reject_if_too_long(text: str, limit: int = config.MAX_CHARS) -> None:
+    """Refuse over-long documents with a clear message instead of silently cutting them.
+    (A silent cut made the formatted download delete the end of long reports.)"""
+    if len(text) > limit:
+        words = len(text.split())
+        raise HTTPException(413, f"This report is about {words:,} words. Report Program can handle up to about "
+                                 f"{limit // 6:,} words at a time, so please split it into parts (for example by chapter).")
+
+
 class AnalyzeIn(BaseModel):
     text: str
     mode: str = "standard"
@@ -97,13 +106,15 @@ async def extract(file: UploadFile = File(...)):
         raise HTTPException(400, str(e))
     except Exception:  # corrupt or malicious file: fail safely, reveal nothing
         raise HTTPException(400, "Couldn't read that file. Is it a valid .docx, .pdf or .txt?")
-    return {"text": text[: config.MAX_CHARS], "filename": (file.filename or "")[:200]}
+    _reject_if_too_long(text)
+    return {"text": text, "filename": (file.filename or "")[:200]}
 
 
 @app.post("/api/analyze")
 def analyze_ep(body: AnalyzeIn):
     if not body.text.strip():
         raise HTTPException(400, "No text")
+    _reject_if_too_long(body.text)
     return analyze(body.text, body.mode)
 
 
@@ -207,6 +218,7 @@ def reports_get(report_id: str):
 def reports_save(body: ReportIn):
     if not body.text.strip():
         raise HTTPException(400, "Nothing to save")
+    _reject_if_too_long(body.text, reports.MAX_TEXT)
     try:
         return reports.save_report(body.text, body.mode, body.id, body.title, body.ai_percent,
                                    _decode_docx(body.original_b64), body.original_name)
@@ -264,7 +276,8 @@ def export_original(body: ExportOriginalIn):
             data = None
     if data is None:
         raise HTTPException(404, "The original Word file isn't available. Upload the .docx again to download with its formatting.")
-    out, stats = apply_edits_to_docx(data, body.text[: config.MAX_CHARS])
+    _reject_if_too_long(body.text, 2 * config.MAX_CHARS)  # room for edits; never cut (a cut deletes the file's end)
+    out, stats = apply_edits_to_docx(data, body.text)
     size_before = len(out)
     shrink = {"fonts_removed": [], "fonts_kept": [], "images_shrunk": 0}
     if body.compress:

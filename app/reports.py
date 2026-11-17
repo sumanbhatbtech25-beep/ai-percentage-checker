@@ -126,7 +126,8 @@ def save_report(text: str, mode: str = "standard", report_id: str | None = None,
             existing = {}
     else:
         report_id = secrets.token_hex(6)
-    text = text[:MAX_TEXT]
+    if len(text) > MAX_TEXT:  # never silently cut a saved report
+        raise ValueError("Report too long")
     d = {
         "id": report_id,
         "title": (title or existing.get("title") or _derive_title(text)).strip()[:120],

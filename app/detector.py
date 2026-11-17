@@ -302,7 +302,7 @@ def score_raw(raw: Raw, mode: str) -> tuple[list, list]:
 def analyze(text: str, mode: str = DEFAULT_MODE, with_suggestions: bool = True) -> dict:
     if mode not in MODES:
         mode = DEFAULT_MODE
-    text = text.replace("\r\n", "\n")[: config.MAX_CHARS]
+    text = text.replace("\r\n", "\n")  # length is checked by the API; never cut here (offsets must match the page)
     raw = collect_raw(text)
     sents = raw.sents
     thr = MODES[mode]["threshold"]
