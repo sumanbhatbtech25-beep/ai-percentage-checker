@@ -7,8 +7,7 @@ if (EDITOR) document.title = "Editor · Report Program";
 // "Fix it in the Editor" hands the current text over to /editor, which re-runs it there
 function openInEditor() {
   try {
-    const orig = state.original && (!state.original.b64 || state.original.b64.length < 3_000_000) ? state.original : null;
-    sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value, reportId: state.reportId, title: state.title, original: orig, originalSaved: state.originalSaved }));
+    sessionStorage.setItem("aic_handoff", JSON.stringify({ text: state.text, mode: $("mode").value, reportId: state.reportId, title: state.title, original: state.original, originalSaved: state.originalSaved }));
   } catch {}
   state.leaving = true; // a saved report carries over, so no "unsaved changes" warning
   location.href = state.reportId ? `/editor?report=${state.reportId}` : "/editor";
@@ -66,20 +65,12 @@ async function loadFile(file) {
   // keep the original Word file so the download can keep its exact formatting
   const lower = file.name.toLowerCase();
   // `text` remembers what this file produced, so pasting other text can never be written into it
-  state.original = lower.endsWith(".docx") ? { name: file.name, kind: "docx", b64: await fileToBase64(file), text: j.text }
+  state.original = lower.endsWith(".docx") && j.original_id ? { name: file.name, kind: "docx", id: j.original_id, text: j.text }
     : { name: file.name, kind: lower.endsWith(".pdf") ? "pdf" : "txt" };
   state.originalSaved = false;
   updateCheckBtn();
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result).split(",")[1] || "");
-    fr.onerror = () => reject(fr.error);
-    fr.readAsDataURL(file);
-  });
-}
 $("file").addEventListener("change", (e) => e.target.files[0] && loadFile(e.target.files[0]));
 const drop = $("drop");
 ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
@@ -393,14 +384,15 @@ async function saveReport() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: state.reportId, text: textAtSave, mode: $("mode").value, title: state.title || null, ai_percent: state.result?.ai_percent ?? null,
-        ...(state.original?.b64 && !state.originalSaved ? { original_b64: state.original.b64, original_name: state.original.name } : {}),
+        ...(state.original?.id && !state.originalSaved ? { original_id: state.original.id, original_name: state.original.name } : {}),
       }),
     });
     const j = await readJson(r);
+    if (r.status === 410) return reportWasDeleted(j.detail);
     if (!r.ok) throw new Error(j.detail || "Couldn't save");
     state.reportId = j.id;
     state.title = j.title;
-    if (state.original?.b64) state.originalSaved = true;
+    if (state.original?.id) state.originalSaved = !!j.original_name;
     state.savedText = textAtSave;
     state.savedScore = j.ai_percent;
     const url = new URL(location.href);
@@ -410,6 +402,20 @@ async function saveReport() {
   } catch (e) {
     renderSaveStatus(`Not saved: ${e.message}`);
   }
+}
+
+// The report was deleted (e.g. on the home page) while this page was open: stop
+// auto-saving and don't recreate it. "Save report" saves it again as a new report.
+function reportWasDeleted(msg) {
+  clearTimeout(saveTimer);
+  state.reportId = null;
+  state.savedText = "";
+  state.originalSaved = false;
+  const url = new URL(location.href);
+  url.searchParams.delete("report");
+  history.replaceState(null, "", url);
+  renderSaveStatus();
+  renderSaveStatus(msg || "This report was deleted.");
 }
 
 function autoSave() {
@@ -823,10 +829,10 @@ async function exportOriginal(compress) {
   const label = btn.textContent;
   btn.textContent = compress ? "Compressing…" : "Preparing your file…";
   try {
-    const useReport = !o.b64 || (state.reportId && state.originalSaved);
+    const useReport = state.reportId && state.originalSaved;
     const r = await fetch("/api/export-original", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: currentText(), filename: o.name, compress, ...(useReport ? { report_id: state.reportId } : { original_b64: o.b64 }) }),
+      body: JSON.stringify({ text: currentText(), filename: o.name, compress, ...(useReport ? { report_id: state.reportId } : { original_id: o.id }) }),
     });
     if (!r.ok) throw new Error((await readJson(r)).detail || "Download failed");
     const changes = +r.headers.get("X-Changes"), merged = +r.headers.get("X-Structure-Changes");

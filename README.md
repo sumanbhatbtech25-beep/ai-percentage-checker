@@ -73,6 +73,16 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
+## Run the tests
+```bash
+.venv\Scripts\python -m unittest discover -s tests -v
+```
+13 tests, about 30 s, no GPU or AI models needed. They cover:
+- writing edits into the original Word file (random edits, formatting, tables and images kept);
+- long reports being refused, never cut;
+- host and cross-site protection, including phone mode after a Wi-Fi address change;
+- encrypted saved reports, deleted reports staying deleted, and unsafe ids.
+
 ## Measure accuracy
 ```bash
 .venv\Scripts\python -m app.compare_detectors     # head-to-head test of candidate detectors

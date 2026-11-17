@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import access, config, reports, security, similarity
+from . import access, config, reports, security, similarity, uploads
 from .detector import analyze
 from .extract import extract_text, text_to_docx
 from .models import DEVICE, get_models
@@ -107,7 +107,8 @@ async def extract(file: UploadFile = File(...)):
     except Exception:  # corrupt or malicious file: fail safely, reveal nothing
         raise HTTPException(400, "Couldn't read that file. Is it a valid .docx, .pdf or .txt?")
     _reject_if_too_long(text)
-    return {"text": text, "filename": (file.filename or "")[:200]}
+    original_id = uploads.put(data) if name.endswith(".docx") else None  # for formatting-keeping downloads
+    return {"text": text, "filename": (file.filename or "")[:200], "original_id": original_id}
 
 
 @app.post("/api/analyze")
@@ -177,28 +178,8 @@ class ReportIn(BaseModel):
     id: str | None = None
     title: str | None = None
     ai_percent: int | None = None
-    original_b64: str | None = None   # the uploaded .docx, sent once so downloads keep its formatting
+    original_id: str | None = None    # id of the uploaded .docx (see app/uploads.py), sent once
     original_name: str | None = None
-
-
-def _decode_docx(b64: str | None) -> bytes | None:
-    """Decode and sanity-check an uploaded original .docx (size-limited, must open as Word)."""
-    if not b64:
-        return None
-    import base64
-    import binascii
-    import io as _io
-
-    if len(b64) > 28_000_000:
-        raise HTTPException(413, "Original file too large (20 MB max)")
-    try:
-        data = base64.b64decode(b64, validate=True)
-        from docx import Document
-
-        Document(_io.BytesIO(data))
-    except (binascii.Error, ValueError, Exception):
-        raise HTTPException(400, "The original file isn't a valid .docx")
-    return data
 
 
 @app.get("/api/reports")
@@ -221,7 +202,9 @@ def reports_save(body: ReportIn):
     _reject_if_too_long(body.text, reports.MAX_TEXT)
     try:
         return reports.save_report(body.text, body.mode, body.id, body.title, body.ai_percent,
-                                   _decode_docx(body.original_b64), body.original_name)
+                                   uploads.get(body.original_id), body.original_name)
+    except FileNotFoundError:
+        raise HTTPException(410, "This report was deleted. Press Save report to keep it as a new report.")
     except ValueError:
         raise HTTPException(400, "Invalid report id")
 
@@ -255,7 +238,7 @@ def papers_page():
 class ExportOriginalIn(BaseModel):
     text: str
     report_id: str | None = None      # use the original stored with a saved report...
-    original_b64: str | None = None   # ...or the one the page still holds
+    original_id: str | None = None    # ...or the file uploaded in this session
     filename: str | None = None
     compress: bool = False            # also make the file smaller (embedded standard fonts, big images)
 
@@ -268,7 +251,7 @@ def export_original(body: ExportOriginalIn):
 
     from .docx_edit import apply_edits_to_docx
 
-    data = _decode_docx(body.original_b64)
+    data = uploads.get(body.original_id)
     if data is None and body.report_id:
         try:
             data = reports.get_original(body.report_id)

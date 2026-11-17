@@ -120,10 +120,9 @@ def save_report(text: str, mode: str = "standard", report_id: str | None = None,
     now = time.time()
     existing = {}
     if report_id:
-        try:
-            existing = get_report(report_id)
-        except FileNotFoundError:
-            existing = {}
+        # FileNotFoundError if it was deleted meanwhile (e.g. on the home page while a
+        # tab still had it open): never silently recreate a report the user deleted
+        existing = get_report(report_id)
     else:
         report_id = secrets.token_hex(6)
     if len(text) > MAX_TEXT:  # never silently cut a saved report

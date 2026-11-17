@@ -16,6 +16,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
+import time
 from urllib.parse import urlparse
 
 from fastapi import Request
@@ -60,10 +61,22 @@ def _lan_addresses() -> set[str]:
     return addrs
 
 
-ALLOWED_HOSTS = set(LOCAL_HOSTS)
-if access.enabled():  # phone mode: also accept this computer's own network address
-    ALLOWED_HOSTS |= _lan_addresses()
-ALLOWED_HOSTS |= {h.strip().lower() for h in os.environ.get("AIC_ALLOWED_HOSTS", "").split(",") if h.strip()}
+ALLOWED_HOSTS = set(LOCAL_HOSTS) | {h.strip().lower() for h in os.environ.get("AIC_ALLOWED_HOSTS", "").split(",") if h.strip()}
+_lan: tuple[float, set[str]] = (0.0, set())
+
+
+def _current_lan() -> set[str]:
+    """This computer's network addresses, re-read at most every 30 s. The address can
+    change while the server runs (sleep, new Wi-Fi), and phone mode must keep working."""
+    global _lan
+    now = time.time()
+    if now - _lan[0] > 30:
+        _lan = (now, _lan_addresses())
+    return _lan[1]
+
+
+def host_allowed(host: str) -> bool:
+    return host in ALLOWED_HOSTS or (access.enabled() and host in _current_lan())
 
 
 def _hostname(host_header: str) -> str:
@@ -75,7 +88,7 @@ def _hostname(host_header: str) -> str:
 
 async def middleware(request: Request, call_next):
     host = _hostname(request.headers.get("host", ""))
-    if host not in ALLOWED_HOSTS:
+    if not host_allowed(host):
         return PlainTextResponse("Unknown host", status_code=421)
 
     if request.method in UNSAFE:
